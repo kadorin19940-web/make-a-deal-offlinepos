@@ -1,0 +1,1 @@
+export { registerSupplierHandlers } from './customers'

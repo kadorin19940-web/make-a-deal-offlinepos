@@ -1,0 +1,1 @@
+export { registerBackupHandlers } from './customers'

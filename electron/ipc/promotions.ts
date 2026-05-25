@@ -1,0 +1,1 @@
+export { registerPromotionHandlers } from './customers'

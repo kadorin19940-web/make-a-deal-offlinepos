@@ -1,0 +1,1 @@
+export { registerSessionHandlers } from './customers'

@@ -1,0 +1,65 @@
+{
+  "name": "make-a-deal-pos",
+  "version": "1.0.0",
+  "description": "Make a Deal POS - Offline Point of Sale System",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:vite": "vite",
+    "dev:electron": "wait-on http://localhost:5173 && electron .",
+    "build": "tsc && vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "start": "electron .",
+    "dist:win": "npm run build:all && npx electron-builder --win",
+    "dist:mac": "npm run build:all && npx electron-builder --mac",
+    "dist:linux": "npm run build:all && npx electron-builder --linux",
+    "preview": "vite preview",
+    "build:all": "npm run build && npx tsc -p tsconfig.electron.json"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^9.4.3",
+    "date-fns": "^3.6.0",
+    "electron-store": "^8.2.0",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.8.2",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^20.11.5",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "@vitejs/plugin-react": "^4.7.0",
+    "autoprefixer": "^10.5.0",
+    "concurrently": "^8.2.2",
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.3",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21",
+    "vite-plugin-electron": "^0.28.4",
+    "wait-on": "^7.2.0"
+  },
+  "peerDependencies": {
+    "@hookform/resolvers": "^3.3.4",
+    "framer-motion": "^11.0.3",
+    "i18next": "^23.8.2",
+    "lucide-react": "^0.312.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.49.3",
+    "react-hot-toast": "^2.6.0",
+    "react-i18next": "^14.0.0",
+    "react-router-dom": "^6.30.3",
+    "recharts": "^2.15.4",
+    "zod": "^3.22.4",
+    "zustand": "^4.5.7"
+  },
+  "author": {
+    "name": "Make a Deal",
+    "email": "dev@makeadeal.co.th"
+  }
+}

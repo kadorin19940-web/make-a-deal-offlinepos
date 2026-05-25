@@ -1,0 +1,1 @@
+export { registerUserHandlers } from './customers'
