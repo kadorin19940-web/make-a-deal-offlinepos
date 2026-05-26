@@ -37,7 +37,7 @@
     "installerIcon": "build-resources/icon.ico",
     "uninstallerIcon": "build-resources/icon.ico",
     "installerHeaderIcon": "build-resources/icon.ico",
-    "languages": ["th_TH", "en_US"],
+    "installerLanguages": ["th", "en"],
     "deleteAppDataOnUninstall": false,
     "artifactName": "Make-a-Deal-POS-Setup-${version}.exe"
   },
