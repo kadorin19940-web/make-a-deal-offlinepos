@@ -109,6 +109,7 @@ const api = {
     getAll: (filters?: Record<string, unknown>) => ipcRenderer.invoke('sessions:getAll', filters),
     addTransaction: (data: Record<string, unknown>) => ipcRenderer.invoke('sessions:addTransaction', data),
     getTransactions: (sessionId: number) => ipcRenderer.invoke('sessions:getTransactions', sessionId),
+    delete: (id: number) => ipcRenderer.invoke('sessions:delete', id),
   },
 
   // Promotions

@@ -1,27 +1,70 @@
-import { useState } from 'react'
-import { Warehouse, ArrowUp, ArrowDown, RefreshCw, AlertTriangle, Package, Download, Loader } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Warehouse, ArrowUp, ArrowDown, AlertTriangle, Package, Download, Loader, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 import type { Product } from '../../types'
+import { useAuthStore } from '../../store'
 
 const api = (window as any).api
-
-const MOCK_PRODUCTS: Product[] = [
-  { id: 1, name: 'กาแฟอเมริกาโน่', barcode: '8850006110150', sku: 'P001', sell_price: 85, cost_price: 25, stock_qty: 100, min_stock: 10, max_stock: 200, unit: 'แก้ว', category_name: 'อาหาร', category_icon: '🍔', category_color: '#F59E0B', is_service: 0, is_active: 1, has_variants: 0, tax_rate: 7, created_at: '', updated_at: '' },
-  { id: 2, name: 'สมาร์ทโฟน X12', barcode: '8850006110154', sku: 'P003', sell_price: 15900, cost_price: 10000, stock_qty: 2, min_stock: 3, max_stock: 20, unit: 'เครื่อง', category_name: 'ไฟฟ้า', category_icon: '📱', category_color: '#3B82F6', is_service: 0, is_active: 1, has_variants: 0, tax_rate: 7, created_at: '', updated_at: '' },
-  { id: 3, name: 'ลิปสติก Matte', barcode: '8850006110162', sku: 'P004', sell_price: 350, cost_price: 100, stock_qty: 0, min_stock: 10, max_stock: 50, unit: 'แท่ง', category_name: 'ความงาม', category_icon: '💄', category_color: '#8B5CF6', is_service: 0, is_active: 1, has_variants: 0, tax_rate: 7, created_at: '', updated_at: '' },
-  { id: 4, name: 'น้ำเปล่า 1.5L', barcode: '8850006110169', sku: 'P010', sell_price: 15, cost_price: 5, stock_qty: 500, min_stock: 50, max_stock: 1000, unit: 'ขวด', category_name: 'อาหาร', category_icon: '🍔', category_color: '#F59E0B', is_service: 0, is_active: 1, has_variants: 0, tax_rate: 7, created_at: '', updated_at: '' },
-]
 
 type StockFilter = 'all' | 'low' | 'out'
 
 export default function InventoryPage() {
+  const [products, setProducts] = useState<Product[]>([])
   const [filter, setFilter] = useState<StockFilter>('all')
   const [adjustProduct, setAdjustProduct] = useState<Product | null>(null)
   const [adjustType, setAdjustType] = useState<'in' | 'out' | 'adjust'>('in')
   const [adjustQty, setAdjustQty] = useState('')
   const [adjustNote, setAdjustNote] = useState('')
   const [exporting, setExporting] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  // Auth store to check role
+  const { user } = useAuthStore()
+  const isAdmin = user?.role === 'admin'
+
+  const fetchProducts = async () => {
+    if (!api?.products) return
+    try {
+      setLoading(true)
+      const res = await api.products.getAll()
+      if (res.success) {
+        setProducts(res.data)
+      } else {
+        toast.error(res.error || 'ไม่สามารถดึงข้อมูลคลังสินค้าได้')
+      }
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchProducts()
+  }, [])
+
+  const handleDeleteProduct = async (id: number, name: string) => {
+    if (!isAdmin) {
+      toast.error('ขออภัย เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่มีสิทธิ์ลบสินค้า')
+      return
+    }
+
+    const confirmDelete = window.confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบสินค้า "${name}" ออกจากระบบ? การดำเนินการนี้จะลบรายการสินค้าและข้อมูลประวัติต่างๆ แบบถาวร`)
+    if (!confirmDelete) return
+
+    try {
+      const res = await api.products.delete(id)
+      if (res.success) {
+        toast.success('ลบสินค้าเรียบร้อยแล้ว')
+        fetchProducts()
+      } else {
+        toast.error(res.error || 'ลบสินค้าล้มเหลว')
+      }
+    } catch (e) {
+      toast.error(`เกิดข้อผิดพลาด: ${String(e)}`)
+    }
+  }
 
   // Batch Processing Excel Exporter for Inventory Stock
   const handleExportExcel = async () => {
@@ -30,7 +73,7 @@ export default function InventoryPage() {
     const toastId = toast.loading('กำลังจัดเตรียมข้อมูลคลังสินค้าเพื่อส่งออก...')
 
     try {
-      const dataToExport = [...MOCK_PRODUCTS]
+      const dataToExport = [...products]
       const chunkSize = 5 // process 5 records in a batch
       const processedRows: Record<string, unknown>[] = []
 
@@ -85,28 +128,44 @@ export default function InventoryPage() {
     }
   }
 
-  const filtered = MOCK_PRODUCTS.filter(p => {
+  const filtered = products.filter(p => {
     if (p.is_service) return false
     if (filter === 'low') return p.stock_qty <= p.min_stock && p.stock_qty > 0
     if (filter === 'out') return p.stock_qty <= 0
     return true
   })
 
-  const totalValue = MOCK_PRODUCTS.reduce((s, p) => s + p.stock_qty * p.cost_price, 0)
-  const lowCount = MOCK_PRODUCTS.filter(p => !p.is_service && p.stock_qty <= p.min_stock).length
-  const outCount = MOCK_PRODUCTS.filter(p => !p.is_service && p.stock_qty <= 0).length
+  const totalValue = products.reduce((s, p) => s + (p.stock_qty * (p.cost_price || 0)), 0)
+  const lowCount = products.filter(p => !p.is_service && p.stock_qty <= p.min_stock && p.stock_qty > 0).length
+  const outCount = products.filter(p => !p.is_service && p.stock_qty <= 0).length
 
   const handleAdjust = async () => {
     if (!adjustProduct || !adjustQty) return
     const qty = parseFloat(adjustQty)
     if (isNaN(qty) || qty <= 0) { toast.error('จำนวนไม่ถูกต้อง'); return }
-    if (api) {
-      await api.inventory.adjustStock({ product_id: adjustProduct.id, type: adjustType, qty, note: adjustNote })
+    
+    try {
+      if (api) {
+        const res = await api.inventory.adjustStock({ 
+          product_id: adjustProduct.id, 
+          type: adjustType, 
+          qty, 
+          note: adjustNote || 'ปรับปรุงผ่านหน้าคลังสินค้า' 
+        })
+        if (res.success) {
+          toast.success(`ปรับสต็อก ${adjustProduct.name} เรียบร้อยแล้ว`)
+          fetchProducts()
+        } else {
+          toast.error(res.error || 'ปรับสต็อกล้มเหลว')
+        }
+      }
+    } catch (e) {
+      toast.error('ปรับสต็อกล้มเหลว: ' + String(e))
+    } finally {
+      setAdjustProduct(null)
+      setAdjustQty('')
+      setAdjustNote('')
     }
-    toast.success(`ปรับสต็อก ${adjustProduct.name} แล้ว`)
-    setAdjustProduct(null)
-    setAdjustQty('')
-    setAdjustNote('')
   }
 
   const stockStatus = (p: Product) => {
@@ -138,7 +197,7 @@ export default function InventoryPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
         {[
           { label: 'มูลค่าสต็อกรวม', value: `฿${totalValue.toLocaleString()}`, color: '#22c55e', icon: <Package size={18} /> },
-          { label: 'สินค้าทั้งหมด', value: MOCK_PRODUCTS.filter(p => !p.is_service).length, color: '#3b82f6', icon: <Warehouse size={18} /> },
+          { label: 'สินค้าทั้งหมด', value: products.filter(p => !p.is_service).length, color: '#3b82f6', icon: <Warehouse size={18} /> },
           { label: 'ใกล้หมด', value: lowCount, color: '#f59e0b', icon: <AlertTriangle size={18} /> },
           { label: 'หมดสต็อก', value: outCount, color: '#ef4444', icon: <AlertTriangle size={18} /> },
         ].map((s, i) => (
@@ -186,49 +245,71 @@ export default function InventoryPage() {
               <th>ต้นทุน/ชิ้น</th>
               <th>มูลค่ารวม</th>
               <th>สถานะ</th>
-              <th style={{ width: 120 }}>ปรับสต็อก</th>
+              <th style={{ width: 180 }}>การจัดการ</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map(p => {
-              const { label, color } = stockStatus(p)
-              return (
-                <tr key={p.id}>
-                  <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ fontSize: 20 }}>{p.category_icon}</span>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.9)' }}>{p.name}</div>
-                        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>{p.barcode}</div>
+            {loading ? (
+              <tr>
+                <td colSpan={7} style={{ textAlign: 'center', paddingTop: 32, paddingBottom: 32, color: 'rgba(255,255,255,0.3)' }}>
+                  กำลังโหลดข้อมูลคลังสินค้า...
+                </td>
+              </tr>
+            ) : filtered.length === 0 ? (
+              <tr>
+                <td colSpan={7} style={{ textAlign: 'center', paddingTop: 32, paddingBottom: 32, color: 'rgba(255,255,255,0.3)' }}>
+                  ไม่มีสินค้าในคลัง
+                </td>
+              </tr>
+            ) : (
+              filtered.map(p => {
+                const { label, color } = stockStatus(p)
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 20 }}>{p.category_icon || '📦'}</span>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.9)' }}>{p.name}</div>
+                          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>{p.barcode || '—'}</div>
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  <td style={{ fontWeight: 700, color: p.stock_qty <= 0 ? '#ef4444' : p.stock_qty <= p.min_stock ? '#fcd34d' : 'rgba(255,255,255,0.9)', fontSize: 15 }}>
-                    {p.stock_qty} {p.unit}
-                  </td>
-                  <td style={{ color: 'rgba(255,255,255,0.45)' }}>{p.min_stock} {p.unit}</td>
-                  <td style={{ color: 'rgba(255,255,255,0.6)' }}>฿{p.cost_price.toLocaleString()}</td>
-                  <td style={{ color: '#22c55e', fontWeight: 600 }}>฿{(p.stock_qty * p.cost_price).toLocaleString()}</td>
-                  <td>
-                    <span style={{ padding: '2px 10px', borderRadius: 100, fontSize: 11, fontWeight: 600, background: `${color}18`, color, border: `1px solid ${color}33` }}>
-                      {label}
-                    </span>
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button onClick={() => { setAdjustProduct(p); setAdjustType('in') }}
-                        style={{ padding: '5px 10px', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 6, cursor: 'pointer', color: '#22c55e', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'inherit' }}>
-                        <ArrowUp size={12} /> รับเข้า
-                      </button>
-                      <button onClick={() => { setAdjustProduct(p); setAdjustType('out') }}
-                        style={{ padding: '5px 10px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', color: '#fca5a5', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'inherit' }}>
-                        <ArrowDown size={12} /> ตัดออก
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
+                    </td>
+                    <td style={{ fontWeight: 700, color: p.stock_qty <= 0 ? '#ef4444' : p.stock_qty <= (p.min_stock || 0) ? '#fcd34d' : 'rgba(255,255,255,0.9)', fontSize: 15 }}>
+                      {p.stock_qty} {p.unit || 'ชิ้น'}
+                    </td>
+                    <td style={{ color: 'rgba(255,255,255,0.45)' }}>{p.min_stock || 0} {p.unit || 'ชิ้น'}</td>
+                    <td style={{ color: 'rgba(255,255,255,0.6)' }}>฿{(p.cost_price || 0).toLocaleString()}</td>
+                    <td style={{ color: '#22c55e', fontWeight: 600 }}>฿{(p.stock_qty * (p.cost_price || 0)).toLocaleString()}</td>
+                    <td>
+                      <span style={{ padding: '2px 10px', borderRadius: 100, fontSize: 11, fontWeight: 600, background: `${color}18`, color, border: `1px solid ${color}33` }}>
+                        {label}
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <button onClick={() => { setAdjustProduct(p); setAdjustType('in') }}
+                          style={{ padding: '5px 8px', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 6, cursor: 'pointer', color: '#22c55e', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'inherit' }}>
+                          <ArrowUp size={12} /> รับเข้า
+                        </button>
+                        <button onClick={() => { setAdjustProduct(p); setAdjustType('out') }}
+                          style={{ padding: '5px 8px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', color: '#fca5a5', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'inherit' }}>
+                          <ArrowDown size={12} /> ตัดออก
+                        </button>
+                        
+                        {isAdmin && (
+                          <button onClick={() => handleDeleteProduct(p.id, p.name)} 
+                            title="ลบสินค้าถาวร"
+                            style={{ padding: '5px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', color: '#f87171', display: 'flex', alignItems: 'center' }}>
+                            <Trash2 size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })
+            )}
           </tbody>
         </table>
       </div>

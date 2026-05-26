@@ -412,78 +412,10 @@ function seedData() {
     insertSetting.run(key, value)
   }
 
-  // Seed categories
-  const categories = [
-    { name: 'อาหารและเครื่องดื่ม', name_en: 'Food & Beverage', color: '#F59E0B', icon: '🍔', sort_order: 1 },
-    { name: 'เครื่องใช้ไฟฟ้า', name_en: 'Electronics', color: '#3B82F6', icon: '📱', sort_order: 2 },
-    { name: 'เครื่องแต่งกาย', name_en: 'Clothing', color: '#EC4899', icon: '👕', sort_order: 3 },
-    { name: 'สุขภาพและความงาม', name_en: 'Health & Beauty', color: '#8B5CF6', icon: '💄', sort_order: 4 },
-    { name: 'บริการ', name_en: 'Services', color: '#22C55E', icon: '⚡', sort_order: 5 },
-  ]
-
-  const insertCat = db.prepare('INSERT INTO categories (name, name_en, color, icon, sort_order) VALUES (?, ?, ?, ?, ?)')
-  for (const cat of categories) {
-    insertCat.run(cat.name, cat.name_en, cat.color, cat.icon, cat.sort_order)
-  }
-
-  // Seed products
-  const products = [
-    { barcode: '8850006110150', sku: 'PROD001', name: 'กาแฟอเมริกาโน่', category_id: 1, sell_price: 85, cost_price: 25, stock_qty: 100, min_stock: 10, unit: 'แก้ว' },
-    { barcode: '8850006110151', sku: 'PROD002', name: 'ชาเย็น', category_id: 1, sell_price: 65, cost_price: 15, stock_qty: 150, min_stock: 20, unit: 'แก้ว' },
-    { barcode: '8850006110152', sku: 'PROD003', name: 'น้ำส้มคั้นสด', category_id: 1, sell_price: 75, cost_price: 20, stock_qty: 80, min_stock: 10, unit: 'แก้ว' },
-    { barcode: '8850006110153', sku: 'PROD004', name: 'แซนวิชไก่', category_id: 1, sell_price: 120, cost_price: 45, stock_qty: 50, min_stock: 5, unit: 'ชิ้น' },
-    { barcode: '8850006110154', sku: 'PROD005', name: 'สมาร์ทโฟน X12', category_id: 2, sell_price: 15900, cost_price: 10000, stock_qty: 25, min_stock: 3, unit: 'เครื่อง' },
-    { barcode: '8850006110155', sku: 'PROD006', name: 'หูฟัง BT Pro', category_id: 2, sell_price: 2990, cost_price: 1200, stock_qty: 40, min_stock: 5, unit: 'ชิ้น' },
-    { barcode: '8850006110156', sku: 'PROD007', name: 'สายชาร์จ USB-C', category_id: 2, sell_price: 390, cost_price: 80, stock_qty: 200, min_stock: 20, unit: 'เส้น' },
-    { barcode: '8850006110157', sku: 'PROD008', name: 'เสื้อยืด Cotton', category_id: 3, sell_price: 299, cost_price: 90, stock_qty: 100, min_stock: 10, unit: 'ตัว' },
-    { barcode: '8850006110158', sku: 'PROD009', name: 'กางเกงยีนส์', category_id: 3, sell_price: 890, cost_price: 300, stock_qty: 60, min_stock: 5, unit: 'ตัว' },
-    { barcode: '8850006110159', sku: 'PROD010', name: 'ครีมบำรุงผิว SPF50', category_id: 4, sell_price: 450, cost_price: 150, stock_qty: 80, min_stock: 10, unit: 'ขวด' },
-    { barcode: '8850006110160', sku: 'PROD011', name: 'แชมพูสมุนไพร', category_id: 4, sell_price: 189, cost_price: 60, stock_qty: 120, min_stock: 15, unit: 'ขวด' },
-    { barcode: '8850006110161', sku: 'PROD012', name: 'ลิปสติก Matte', category_id: 4, sell_price: 350, cost_price: 100, stock_qty: 5, min_stock: 10, unit: 'แท่ง' },
-    { barcode: '8850006110162', sku: 'PROD013', name: 'บริการล้างรถ', category_id: 5, sell_price: 300, cost_price: 50, stock_qty: 0, min_stock: 0, unit: 'ครั้ง', is_service: 1 },
-    { barcode: '8850006110163', sku: 'PROD014', name: 'บริการส่งด่วน', category_id: 5, sell_price: 150, cost_price: 80, stock_qty: 0, min_stock: 0, unit: 'ครั้ง', is_service: 1 },
-    { barcode: '8850006110164', sku: 'PROD015', name: 'น้ำเปล่า 1.5L', category_id: 1, sell_price: 15, cost_price: 5, stock_qty: 500, min_stock: 50, unit: 'ขวด' },
-    { barcode: '8850006110165', sku: 'PROD016', name: 'เค้กช็อคโกแลต', category_id: 1, sell_price: 180, cost_price: 70, stock_qty: 20, min_stock: 3, unit: 'ชิ้น' },
-    { barcode: '8850006110166', sku: 'PROD017', name: 'แท็บเล็ต 10"', category_id: 2, sell_price: 8900, cost_price: 5500, stock_qty: 2, min_stock: 3, unit: 'เครื่อง' },
-    { barcode: '8850006110167', sku: 'PROD018', name: 'รองเท้าวิ่ง', category_id: 3, sell_price: 1290, cost_price: 450, stock_qty: 35, min_stock: 5, unit: 'คู่' },
-    { barcode: '8850006110168', sku: 'PROD019', name: 'วิตามิน C 1000mg', category_id: 4, sell_price: 299, cost_price: 90, stock_qty: 90, min_stock: 15, unit: 'กล่อง' },
-    { barcode: '8850006110169', sku: 'PROD020', name: 'คีย์บอร์ดไร้สาย', category_id: 2, sell_price: 1590, cost_price: 600, stock_qty: 18, min_stock: 3, unit: 'ชิ้น' },
-  ]
-
-  const insertProduct = db.prepare(`
-    INSERT INTO products (barcode, sku, name, category_id, sell_price, cost_price, stock_qty, min_stock, unit, is_service, tax_rate)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 7)
-  `)
-
-  for (const p of products) {
-    insertProduct.run(p.barcode, p.sku, p.name, p.category_id, p.sell_price, p.cost_price, p.stock_qty, p.min_stock, p.unit, p.is_service || 0)
-  }
-
-  // Seed sample customers
-  const customers = [
-    { code: 'CUST001', name: 'คุณสมชาย ใจดี', phone: '081-234-5678', email: 'somchai@email.com', customer_type: 'retail', points: 250 },
-    { code: 'CUST002', name: 'บริษัท ABC จำกัด', phone: '02-345-6789', email: 'abc@company.com', customer_type: 'wholesale', price_level: 2 },
-    { code: 'CUST003', name: 'คุณมาลี สวยงาม', phone: '089-876-5432', customer_type: 'member', points: 1200 },
-  ]
-
-  const insertCustomer = db.prepare(`
-    INSERT INTO customers (code, name, phone, email, customer_type, price_level, points)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `)
-  for (const c of customers) {
-    insertCustomer.run(c.code, c.name, c.phone, c.email || null, c.customer_type, c.price_level || 1, c.points || 0)
-  }
-
   // Default loyalty rule
   db.prepare(`
     INSERT INTO loyalty_rules (name, earn_per_baht, redeem_per_baht, min_redeem, is_active)
     VALUES ('กฎสะสมแต้มมาตรฐาน', 1, 0.1, 100, 1)
-  `).run()
-
-  // Sample promotion
-  db.prepare(`
-    INSERT INTO promotions (name, type, code, discount_value, min_purchase, apply_to, is_active)
-    VALUES ('ส่วนลดต้อนรับ', 'percent_off', 'WELCOME10', 10, 500, 'all', 1)
   `).run()
 
   console.log('Seed data created successfully')

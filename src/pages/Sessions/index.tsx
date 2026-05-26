@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { DollarSign, Play, Square, ArrowUp, ArrowDown, Clock, X } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { DollarSign, Play, Square, ArrowUp, ArrowDown, Clock, X, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useSessionStore, useAuthStore } from '../../store'
 import type { CashSession } from '../../types'
@@ -8,14 +8,13 @@ import { th } from 'date-fns/locale'
 
 const api = (window as any).api
 
-const MOCK_HISTORY: CashSession[] = [
-  { id: 1, user_id: 1, user_name: 'ผู้ดูแลระบบ', open_time: '2024-01-15T08:00:00', close_time: '2024-01-15T18:30:00', open_amount: 1000, close_amount: 8540, expected_amount: 8500, difference: 40, total_sales: 12800, total_refunds: 0, total_void: 300, cash_sales: 7500, card_sales: 3200, transfer_sales: 2100, qr_sales: 0, status: 'closed' },
-  { id: 2, user_id: 2, user_name: 'ผู้จัดการ', open_time: '2024-01-14T08:00:00', close_time: '2024-01-14T18:00:00', open_amount: 1000, close_amount: 6200, expected_amount: 6180, difference: 20, total_sales: 9800, total_refunds: 0, total_void: 0, cash_sales: 5180, card_sales: 2800, transfer_sales: 1820, qr_sales: 0, status: 'closed' },
-]
-
 export default function SessionsPage() {
   const { currentSession, setSession } = useSessionStore()
   const { user } = useAuthStore()
+  const isAdmin = user?.role === 'admin'
+
+  const [history, setHistory] = useState<CashSession[]>([])
+  const [loading, setLoading] = useState(true)
   const [showOpen, setShowOpen] = useState(false)
   const [showClose, setShowClose] = useState(false)
   const [showCash, setShowCash] = useState(false)
@@ -25,41 +24,139 @@ export default function SessionsPage() {
   const [cashAmount, setCashAmount] = useState('')
   const [cashReason, setCashReason] = useState('')
 
+  const fetchActiveSession = async () => {
+    if (!api?.sessions) return
+    try {
+      const res = await api.sessions.getCurrent()
+      if (res.success && res.data) {
+        setSession(res.data)
+      } else {
+        setSession(null)
+      }
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  const fetchHistory = async () => {
+    if (!api?.sessions) return
+    try {
+      setLoading(true)
+      const res = await api.sessions.getAll()
+      if (res.success) {
+        setHistory(res.data)
+      }
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchActiveSession()
+    fetchHistory()
+  }, [])
+
   const handleOpenSession = async () => {
     if (!openAmount || parseFloat(openAmount) < 0) { toast.error('กรุณากรอกยอดเปิดกะ'); return }
     const sessionData = { user_id: user?.id, open_amount: parseFloat(openAmount) }
-    if (api) {
-      const res = await api.sessions.open(sessionData)
-      if (!res.success) { toast.error(res.error); return }
+    
+    try {
+      if (api) {
+        const res = await api.sessions.open(sessionData)
+        if (!res.success) { 
+          toast.error(res.error || 'เกิดข้อผิดพลาดในการเปิดกะ')
+          return 
+        }
+      }
+      
+      toast.success('เปิดกะสำเร็จ')
+      setShowOpen(false)
+      fetchActiveSession()
+      fetchHistory()
+    } catch (e) {
+      toast.error('เปิดกะล้มเหลว: ' + String(e))
     }
-    const fakeSession: CashSession = {
-      id: Date.now(), user_id: user?.id || 1, user_name: user?.name,
-      open_time: new Date().toISOString(), open_amount: parseFloat(openAmount),
-      total_sales: 0, total_refunds: 0, total_void: 0,
-      cash_sales: 0, card_sales: 0, transfer_sales: 0, qr_sales: 0,
-      status: 'open',
-    }
-    setSession(fakeSession)
-    toast.success('เปิดกะสำเร็จ')
-    setShowOpen(false)
   }
 
   const handleCloseSession = async () => {
     if (!closeAmount) { toast.error('กรุณากรอกยอดเงินในลิ้นชัก'); return }
-    if (api) await api.sessions.close({ close_amount: parseFloat(closeAmount) })
-    setSession(null)
-    toast.success('ปิดกะสำเร็จ')
-    setShowClose(false)
+    
+    try {
+      if (api) {
+        const res = await api.sessions.close({ close_amount: parseFloat(closeAmount) })
+        if (!res.success) {
+          toast.error(res.error || 'เกิดข้อผิดพลาดในการปิดกะ')
+          return
+        }
+      }
+      
+      setSession(null)
+      toast.success('ปิดกะสำเร็จ')
+      setShowClose(false)
+      fetchActiveSession()
+      fetchHistory()
+    } catch (e) {
+      toast.error('ปิดกะล้มเหลว: ' + String(e))
+    }
   }
 
   const handleCashTx = async () => {
     if (!cashAmount || parseFloat(cashAmount) <= 0) { toast.error('กรุณากรอกจำนวนเงิน'); return }
-    if (api) await api.sessions.addTransaction({ type: cashType, amount: parseFloat(cashAmount), reason: cashReason, user_id: user?.id })
-    toast.success(`${cashType === 'in' ? 'รับเงินเข้า' : 'จ่ายเงินออก'}สำเร็จ`)
-    setCashAmount(''); setCashReason(''); setShowCash(false)
+    
+    try {
+      if (api) {
+        const res = await api.sessions.addTransaction({ 
+          type: cashType, 
+          amount: parseFloat(cashAmount), 
+          reason: cashReason, 
+          user_id: user?.id 
+        })
+        if (!res.success) {
+          toast.error(res.error || 'บันทึกธุรกรรมล้มเหลว')
+          return
+        }
+      }
+      
+      toast.success(`${cashType === 'in' ? 'รับเงินเข้า' : 'จ่ายเงินออก'}สำเร็จ`)
+      setCashAmount('')
+      setCashReason('')
+      setShowCash(false)
+      fetchActiveSession()
+    } catch (e) {
+      toast.error('บันทึกธุรกรรมล้มเหลว: ' + String(e))
+    }
   }
 
-  const fmt = (n: number) => `฿${n.toLocaleString('th-TH', { minimumFractionDigits: 2 })}`
+  const handleDeleteSession = async (id: number) => {
+    if (!isAdmin) {
+      toast.error('ขออภัย เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่มีสิทธิ์ลบประวัติกะ')
+      return
+    }
+
+    const confirmDelete = window.confirm('คุณแน่ใจหรือไม่ว่าต้องการลบประวัติกะนี้ออกจากระบบ? การดำเนินการนี้จะลบรายการประวัติกะและประวัติรับ/จ่ายเงินสดทั้งหมดแบบถาวร')
+    if (!confirmDelete) return
+
+    try {
+      if (api) {
+        const res = await api.sessions.delete(id)
+        if (res.success) {
+          toast.success('ลบประวัติกะสำเร็จแล้ว')
+          fetchHistory()
+          if (currentSession && currentSession.id === id) {
+            setSession(null)
+          }
+        } else {
+          toast.error(res.error || 'ลบประวัติกะล้มเหลว')
+        }
+      }
+    } catch (e) {
+      toast.error('ลบกะล้มเหลว: ' + String(e))
+    }
+  }
+
+  const fmt = (n: number) => `฿${(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })}`
   const fmtDate = (d: string) => { try { return format(new Date(d), 'dd MMM yyyy HH:mm', { locale: th }) } catch { return d } }
 
   return (
@@ -125,29 +222,63 @@ export default function SessionsPage() {
         <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 16, overflow: 'hidden' }}>
           <table className="data-table">
             <thead>
-              <tr><th>วันที่/เวลา</th><th>พนักงาน</th><th>เปิดกะ</th><th>ยอดขาย</th><th>ปิดกะ</th><th>ผลต่าง</th><th>สถานะ</th></tr>
+              <tr>
+                <th>วันที่/เวลา</th>
+                <th>พนักงาน</th>
+                <th>เปิดกะ</th>
+                <th>ยอดขาย</th>
+                <th>ปิดกะ</th>
+                <th>ผลต่าง</th>
+                <th>สถานะ</th>
+                <th style={{ width: 80 }}>การจัดการ</th>
+              </tr>
             </thead>
             <tbody>
-              {MOCK_HISTORY.map(s => (
-                <tr key={s.id}>
-                  <td>
-                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>{fmtDate(s.open_time)}</div>
-                    {s.close_time && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>ถึง {fmtDate(s.close_time)}</div>}
+              {loading ? (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: 'center', paddingTop: 32, paddingBottom: 32, color: 'rgba(255,255,255,0.3)' }}>
+                    กำลังโหลดข้อมูลประวัติกะ...
                   </td>
-                  <td style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>{s.user_name}</td>
-                  <td style={{ color: 'rgba(255,255,255,0.6)' }}>{fmt(s.open_amount)}</td>
-                  <td style={{ color: '#22c55e', fontWeight: 600 }}>{fmt(s.total_sales)}</td>
-                  <td style={{ color: 'rgba(255,255,255,0.7)' }}>{s.close_amount !== undefined ? fmt(s.close_amount) : '—'}</td>
-                  <td>
-                    {s.difference !== undefined && (
-                      <span style={{ color: s.difference >= 0 ? '#22c55e' : '#ef4444', fontWeight: 600, fontSize: 13 }}>
-                        {s.difference >= 0 ? '+' : ''}{fmt(s.difference)}
-                      </span>
-                    )}
-                  </td>
-                  <td><span className={`badge ${s.status === 'open' ? 'badge-green' : 'badge-blue'}`}>{s.status === 'open' ? 'เปิดอยู่' : 'ปิดแล้ว'}</span></td>
                 </tr>
-              ))}
+              ) : history.length === 0 ? (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: 'center', paddingTop: 32, paddingBottom: 32, color: 'rgba(255,255,255,0.3)' }}>
+                    ไม่มีข้อมูลประวัติการทำงานกะ
+                  </td>
+                </tr>
+              ) : (
+                history.map(s => (
+                  <tr key={s.id}>
+                    <td>
+                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>{fmtDate(s.open_time)}</div>
+                      {s.close_time && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>ถึง {fmtDate(s.close_time)}</div>}
+                    </td>
+                    <td style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>{s.user_name || 'ผู้จัดการ'}</td>
+                    <td style={{ color: 'rgba(255,255,255,0.6)' }}>{fmt(s.open_amount)}</td>
+                    <td style={{ color: '#22c55e', fontWeight: 600 }}>{fmt(s.total_sales)}</td>
+                    <td style={{ color: 'rgba(255,255,255,0.7)' }}>{s.close_amount !== null && s.close_amount !== undefined ? fmt(s.close_amount) : '—'}</td>
+                    <td>
+                      {s.difference !== null && s.difference !== undefined ? (
+                        <span style={{ color: s.difference >= 0 ? '#22c55e' : '#ef4444', fontWeight: 600, fontSize: 13 }}>
+                          {s.difference >= 0 ? '+' : ''}{fmt(s.difference)}
+                        </span>
+                      ) : (
+                        <span style={{ color: 'rgba(255,255,255,0.3)' }}>—</span>
+                      )}
+                    </td>
+                    <td><span className={`badge ${s.status === 'open' ? 'badge-green' : 'badge-blue'}`}>{s.status === 'open' ? 'เปิดอยู่' : 'ปิดแล้ว'}</span></td>
+                    <td>
+                      {isAdmin && (
+                        <button onClick={() => handleDeleteSession(s.id)}
+                          title="ลบประวัติกะถาวร"
+                          style={{ padding: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', color: '#f87171', display: 'flex', alignItems: 'center' }}>
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -190,7 +321,7 @@ export default function SessionsPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>ยอดที่ควรมีในลิ้นชัก</span>
                   <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 700 }}>
-                    {fmt(currentSession.open_amount + currentSession.cash_sales)}
+                    {fmt((currentSession.open_amount || 0) + (currentSession.cash_sales || 0))}
                   </span>
                 </div>
               </div>

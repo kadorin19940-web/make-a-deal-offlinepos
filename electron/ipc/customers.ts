@@ -169,20 +169,45 @@ export function registerInventoryHandlers(db: Database.Database) {
 
   ipcMain.handle('inventory:adjustStock', (_, data: Record<string, unknown>) => {
     try {
-      const product = db.prepare('SELECT stock_qty FROM products WHERE id = ?').get(data.product_id) as { stock_qty: number }
-      let newQty = product.stock_qty
-      if (data.type === 'adjust') newQty = data.qty as number
-      else if (data.type === 'in') newQty += data.qty as number
-      else newQty -= data.qty as number
+      const productId = Number(data.product_id)
+      const inputQty = Number(data.qty)
+      const type = String(data.type)
 
-      db.prepare('UPDATE products SET stock_qty = ? WHERE id = ?').run(newQty, data.product_id)
+      if (isNaN(productId) || isNaN(inputQty)) {
+        return { success: false, error: 'ข้อมูลไม่ถูกต้อง' }
+      }
+
+      const product = db.prepare('SELECT stock_qty, cost_price FROM products WHERE id = ?').get(productId) as { stock_qty: number; cost_price: number } | undefined
+      if (!product) {
+        return { success: false, error: 'ไม่พบสินค้าที่ระบุในคลังสินค้า' }
+      }
+
+      const currentQty = Number(product.stock_qty) || 0
+      let newQty = currentQty
+
+      if (type === 'adjust') {
+        newQty = inputQty
+      } else if (type === 'in') {
+        newQty = currentQty + inputQty
+      } else {
+        newQty = currentQty - inputQty
+      }
+
+      db.prepare('UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newQty, productId)
+      
+      const costPrice = Number(product.cost_price) || 0
       db.prepare(`
         INSERT INTO stock_movements (product_id, type, qty, qty_before, qty_after, cost_price, note, user_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(data.product_id, data.type, data.qty, product.stock_qty, newQty, data.cost_price || 0, data.note || null, data.user_id || null)
+      `).run(productId, type, inputQty, currentQty, newQty, costPrice, (data.note as string) || null, (data.user_id as number) || null)
+      
       return { success: true }
-    } catch (error) { return { success: false, error: String(error) } }
+    } catch (error) { 
+      console.error('adjustStock error:', error)
+      return { success: false, error: String(error) } 
+    }
   })
+
 
   ipcMain.handle('inventory:getPurchaseOrders', (_, filters: Record<string, unknown> = {}) => {
     try {
@@ -712,6 +737,16 @@ export function registerSessionHandlers(db: Database.Database) {
       const txns = db.prepare('SELECT * FROM cash_transactions WHERE session_id = ? ORDER BY created_at ASC').all(sessionId)
       return { success: true, data: txns }
     } catch (error) { return { success: false, error: String(error) } }
+  })
+
+  ipcMain.handle('sessions:delete', (_, id: number) => {
+    try {
+      db.prepare('DELETE FROM cash_transactions WHERE session_id = ?').run(id)
+      db.prepare('DELETE FROM cash_sessions WHERE id = ?').run(id)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
   })
 }
 

@@ -1,14 +1,10 @@
-import { useState } from 'react'
-import { Plus, Search, Edit2, Star, Phone, Mail, Crown, X } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Plus, Search, Edit2, Star, Phone, Mail, Crown, X, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { Customer } from '../../types'
+import { useAuthStore } from '../../store'
 
-const MOCK_CUSTOMERS: Customer[] = [
-  { id: 1, code: 'CUST001', name: 'คุณสมชาย ใจดี', phone: '081-234-5678', email: 'somchai@email.com', customer_type: 'retail', price_level: 1, credit_limit: 0, credit_days: 0, points: 250, total_spend: 15000, discount_percent: 0, is_active: 1, created_at: '2024-01-01' },
-  { id: 2, code: 'CUST002', name: 'บริษัท ABC จำกัด', phone: '02-345-6789', email: 'abc@company.com', customer_type: 'wholesale', price_level: 2, credit_limit: 50000, credit_days: 30, points: 0, total_spend: 85000, discount_percent: 5, is_active: 1, created_at: '2024-01-02' },
-  { id: 3, code: 'CUST003', name: 'คุณมาลี สวยงาม', phone: '089-876-5432', customer_type: 'member', price_level: 1, credit_limit: 0, credit_days: 0, points: 1200, total_spend: 42000, discount_percent: 0, is_active: 1, created_at: '2024-01-03' },
-  { id: 4, code: 'CUST004', name: 'คุณวิชัย รวยมาก', phone: '090-111-2222', customer_type: 'vip', price_level: 3, credit_limit: 200000, credit_days: 60, points: 8500, total_spend: 320000, discount_percent: 10, is_active: 1, created_at: '2024-01-04' },
-]
+const api = (window as any).api
 
 const TYPE_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   retail: { label: 'ปลีก', color: '#64748b', icon: null },
@@ -18,14 +14,58 @@ const TYPE_CONFIG: Record<string, { label: string; color: string; icon: React.Re
 }
 
 export default function CustomersPage() {
-  const [customers] = useState<Customer[]>(MOCK_CUSTOMERS)
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Customer | null>(null)
+  
+  // Auth store to check role
+  const { user } = useAuthStore()
+  const isAdmin = user?.role === 'admin'
+
+  const fetchCustomers = async () => {
+    if (!api?.customers) return
+    try {
+      const res = await api.customers.getAll()
+      if (res.success) {
+        setCustomers(res.data)
+      } else {
+        toast.error(res.error || 'ไม่สามารถดึงข้อมูลลูกค้าได้')
+      }
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  useEffect(() => {
+    fetchCustomers()
+  }, [])
+
+  const handleDelete = async (id: number, name: string) => {
+    if (!isAdmin) {
+      toast.error('ขออภัย เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่มีสิทธิ์ลบข้อมูลลูกค้า')
+      return
+    }
+
+    const confirmDelete = window.confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบข้อมูลของลูกค้า "${name}"? การดำเนินการนี้ไม่สามารถย้อนกลับได้`)
+    if (!confirmDelete) return
+
+    try {
+      const res = await api.customers.delete(id)
+      if (res.success) {
+        toast.success('ลบข้อมูลลูกค้าเรียบร้อยแล้ว')
+        fetchCustomers()
+      } else {
+        toast.error(res.error || 'ลบข้อมูลลูกค้าล้มเหลว')
+      }
+    } catch (e) {
+      toast.error(`เกิดข้อผิดพลาด: ${String(e)}`)
+    }
+  }
 
   const filtered = customers.filter(c =>
     !search || c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.phone?.includes(search) || c.code.includes(search)
+    (c.phone && c.phone.includes(search)) || c.code.includes(search)
   )
 
   const typeConfig = (t: string) => TYPE_CONFIG[t] || TYPE_CONFIG.retail
@@ -48,8 +88,8 @@ export default function CustomersPage() {
         {[
           { label: 'ลูกค้าทั้งหมด', value: customers.length, color: '#3b82f6' },
           { label: 'สมาชิก/VIP', value: customers.filter(c => ['member','vip'].includes(c.customer_type)).length, color: '#f59e0b' },
-          { label: 'แต้มรวม', value: customers.reduce((s,c) => s + c.points, 0).toLocaleString(), color: '#22c55e' },
-          { label: 'ยอดรวมทั้งหมด', value: `฿${customers.reduce((s,c) => s + c.total_spend, 0).toLocaleString()}`, color: '#8b5cf6' },
+          { label: 'แต้มรวม', value: customers.reduce((s,c) => s + (c.points || 0), 0).toLocaleString(), color: '#22c55e' },
+          { label: 'ยอดรวมทั้งหมด', value: `฿${customers.reduce((s,c) => s + (c.total_spend || 0), 0).toLocaleString()}`, color: '#8b5cf6' },
         ].map((s, i) => (
           <div key={i} style={{ padding: '14px 16px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14 }}>
             <div style={{ fontSize: 20, fontWeight: 800, color: s.color }}>{s.value}</div>
@@ -69,59 +109,75 @@ export default function CustomersPage() {
               <th>แต้มสะสม</th>
               <th>ยอดซื้อรวม</th>
               <th>ส่วนลด</th>
-              <th style={{ width: 60 }}></th>
+              <th style={{ width: 100 }}>การจัดการ</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map(c => {
-              const conf = typeConfig(c.customer_type)
-              return (
-                <tr key={c.id}>
-                  <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{
-                        width: 36, height: 36,
-                        background: `${conf.color}22`, border: `1px solid ${conf.color}44`,
-                        borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 15, fontWeight: 700, color: conf.color,
-                      }}>
-                        {c.name.charAt(0)}
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={7} style={{ textAlign: 'center', paddingTop: 32, paddingBottom: 32, color: 'rgba(255,255,255,0.3)' }}>
+                  ไม่มีข้อมูลลูกค้าในระบบ
+                </td>
+              </tr>
+            ) : (
+              filtered.map(c => {
+                const conf = typeConfig(c.customer_type)
+                return (
+                  <tr key={c.id}>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{
+                          width: 36, height: 36,
+                          background: `${conf.color}22`, border: `1px solid ${conf.color}44`,
+                          borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 15, fontWeight: 700, color: conf.color,
+                        }}>
+                          {c.name.charAt(0)}
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.9)' }}>{c.name}</div>
+                          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>{c.code}</div>
+                        </div>
                       </div>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.9)' }}>{c.name}</div>
-                        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>{c.code}</div>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        {c.phone && <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', display: 'flex', alignItems: 'center', gap: 4 }}><Phone size={10} />{c.phone}</span>}
+                        {c.email && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', gap: 4 }}><Mail size={10} />{c.email}</span>}
                       </div>
-                    </div>
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {c.phone && <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', display: 'flex', alignItems: 'center', gap: 4 }}><Phone size={10} />{c.phone}</span>}
-                      {c.email && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', gap: 4 }}><Mail size={10} />{c.email}</span>}
-                    </div>
-                  </td>
-                  <td>
-                    <span style={{ padding: '2px 10px', borderRadius: 100, fontSize: 11, fontWeight: 600, background: `${conf.color}18`, color: conf.color, border: `1px solid ${conf.color}33`, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      {conf.icon}{conf.label}
-                    </span>
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#fcd34d', fontWeight: 600 }}>
-                      <Star size={12} fill="#fcd34d" />
-                      {c.points.toLocaleString()}
-                    </div>
-                  </td>
-                  <td style={{ color: '#22c55e', fontWeight: 600 }}>฿{c.total_spend.toLocaleString()}</td>
-                  <td style={{ color: c.discount_percent > 0 ? '#fcd34d' : 'rgba(255,255,255,0.3)' }}>
-                    {c.discount_percent > 0 ? `${c.discount_percent}%` : '—'}
-                  </td>
-                  <td>
-                    <button onClick={() => { setEditing(c); setShowModal(true) }} style={{ padding: '5px', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 6, cursor: 'pointer', color: '#60a5fa', display: 'flex' }}>
-                      <Edit2 size={13} />
-                    </button>
-                  </td>
-                </tr>
-              )
-            })}
+                    </td>
+                    <td>
+                      <span style={{ padding: '2px 10px', borderRadius: 100, fontSize: 11, fontWeight: 600, background: `${conf.color}18`, color: conf.color, border: `1px solid ${conf.color}33`, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        {conf.icon}{conf.label}
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#fcd34d', fontWeight: 600 }}>
+                        <Star size={12} fill="#fcd34d" />
+                        {(c.points || 0).toLocaleString()}
+                      </div>
+                    </td>
+                    <td style={{ color: '#22c55e', fontWeight: 600 }}>฿{(c.total_spend || 0).toLocaleString()}</td>
+                    <td style={{ color: (c.discount_percent || 0) > 0 ? '#fcd34d' : 'rgba(255,255,255,0.3)' }}>
+                      {(c.discount_percent || 0) > 0 ? `${c.discount_percent}%` : '—'}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={() => { setEditing(c); setShowModal(true) }} style={{ padding: '5px', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 6, cursor: 'pointer', color: '#60a5fa', display: 'flex' }}>
+                          <Edit2 size={13} />
+                        </button>
+                        
+                        {isAdmin && (
+                          <button onClick={() => handleDelete(c.id, c.name)} style={{ padding: '5px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', color: '#f87171', display: 'flex' }}>
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })
+            )}
           </tbody>
         </table>
       </div>
@@ -131,7 +187,10 @@ export default function CustomersPage() {
         <CustomerModal
           customer={editing}
           onClose={() => setShowModal(false)}
-          onSave={() => { toast.success(editing ? 'แก้ไขลูกค้าแล้ว' : 'เพิ่มลูกค้าแล้ว'); setShowModal(false) }}
+          onSave={() => {
+            fetchCustomers()
+            setShowModal(false)
+          }}
         />
       )}
     </div>
@@ -146,7 +205,34 @@ function CustomerModal({ customer, onClose, onSave }: { customer: Customer | nul
     price_level: customer?.price_level || 1, discount_percent: customer?.discount_percent || 0,
     credit_limit: customer?.credit_limit || 0, credit_days: customer?.credit_days || 0, note: customer?.note || '',
   })
+  
   const set = (k: string, v: unknown) => setForm(f => ({ ...f, [k]: v }))
+
+  const handleSave = async () => {
+    if (!form.name.trim()) {
+      toast.error('กรุณากรอกชื่อลูกค้า')
+      return
+    }
+
+    try {
+      let res
+      if (customer) {
+        res = await api.customers.update(customer.id, form)
+      } else {
+        const code = 'CUST' + Math.floor(100000 + Math.random() * 900000)
+        res = await api.customers.create({ ...form, code })
+      }
+
+      if (res.success) {
+        toast.success(customer ? 'แก้ไขข้อมูลลูกค้าแล้ว' : 'เพิ่มลูกค้าใหม่สำเร็จ')
+        onSave()
+      } else {
+        toast.error(res.error || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล')
+      }
+    } catch (e) {
+      toast.error('บันทึกล้มเหลว: ' + String(e))
+    }
+  }
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -180,7 +266,7 @@ function CustomerModal({ customer, onClose, onSave }: { customer: Customer | nul
         </div>
         <div style={{ padding: '0 20px 20px', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button onClick={onClose} className="glass-btn btn-secondary" style={{ fontSize: 13 }}>ยกเลิก</button>
-          <button onClick={onSave} className="glass-btn btn-primary" style={{ fontSize: 13, fontWeight: 700 }}>บันทึก</button>
+          <button onClick={handleSave} className="glass-btn btn-primary" style={{ fontSize: 13, fontWeight: 700 }}>บันทึก</button>
         </div>
       </div>
     </div>
