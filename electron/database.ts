@@ -305,6 +305,18 @@ function createTables() {
     CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);
     CREATE INDEX IF NOT EXISTS idx_activity_logs_user ON activity_logs(user_id);
   `)
+
+  // License Activation table — hardware-locked, single-row design
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS activation (
+      id       INTEGER PRIMARY KEY DEFAULT 1,
+      is_activated INTEGER NOT NULL DEFAULT 0,
+      license_key  TEXT,
+      hardware_id  TEXT,
+      activated_at DATETIME
+    );
+    INSERT OR IGNORE INTO activation (id, is_activated) VALUES (1, 0);
+  `)
 }
 
 function runMigrations() {
@@ -315,6 +327,21 @@ function runMigrations() {
   if (currentVersion < 1) {
     // Initial migration already done via createTables
     db.prepare("INSERT OR REPLACE INTO shop_settings (key, value) VALUES ('db_version', '1')").run()
+  }
+
+  if (currentVersion < 2) {
+    // v2: Hardware-Locked License Activation system
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS activation (
+        id       INTEGER PRIMARY KEY DEFAULT 1,
+        is_activated INTEGER NOT NULL DEFAULT 0,
+        license_key  TEXT,
+        hardware_id  TEXT,
+        activated_at DATETIME
+      );
+      INSERT OR IGNORE INTO activation (id, is_activated) VALUES (1, 0);
+    `)
+    db.prepare("INSERT OR REPLACE INTO shop_settings (key, value) VALUES ('db_version', '2')").run()
   }
 }
 

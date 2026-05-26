@@ -167,6 +167,14 @@ const api = {
   hardware: {
     openDrawer: (comPort: string) => ipcRenderer.invoke('hardware:open-drawer', comPort),
   },
+
+  // License Activation System
+  system: {
+    getHardwareId: () => ipcRenderer.invoke('system:get-hardware-id'),
+    checkActivation: () => ipcRenderer.invoke('system:check-activation'),
+    activateLicense: (licenseKey: string, hardwareId: string) =>
+      ipcRenderer.invoke('system:activate-license', { licenseKey, hardwareId }),
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

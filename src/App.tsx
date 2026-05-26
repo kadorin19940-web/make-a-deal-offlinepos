@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
+import { useState, useEffect } from 'react'
 import { useAuthStore } from './store'
 import Layout from './components/layout/Layout'
 import LoginPage from './pages/Login'
@@ -14,9 +15,41 @@ import PromotionsPage from './pages/Promotions'
 import SessionsPage from './pages/Sessions'
 import SettingsPage from './pages/Settings'
 import LockScreen from './components/layout/LockScreen'
+import ActivationScreen from './pages/Activation'
 
 export default function App() {
   const { isAuthenticated, isLocked } = useAuthStore()
+
+  // ── Activation Gate ────────────────────────────────────────────────────────
+  // null  = still checking (show nothing to avoid flash)
+  // false = not activated  (force ActivationScreen)
+  // true  = activated      (proceed normally)
+  const [isActivated, setIsActivated] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    const api = (window as any).api
+    if (!api?.system) {
+      // Running in browser dev mode without Electron — skip gate
+      setIsActivated(true)
+      return
+    }
+    api.system.checkActivation().then((res: any) => {
+      setIsActivated(res.success ? res.data.is_activated === 1 : true)
+    }).catch(() => setIsActivated(true))
+  }, [])
+
+  // Still reading DB — render nothing to prevent layout flash
+  if (isActivated === null) return null
+
+  // Not activated — cover 100 % of the screen, block all routing
+  if (!isActivated) {
+    return (
+      <>
+        <ActivationScreen onActivated={() => setIsActivated(true)} />
+        <Toaster position="top-right" toastOptions={toastOptions} />
+      </>
+    )
+  }
 
   if (!isAuthenticated) {
     return (

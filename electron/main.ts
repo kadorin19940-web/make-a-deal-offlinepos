@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } from 'electron'
 import path from 'path'
 import fs from 'fs'
+import { machineIdSync } from 'node-machine-id'
 import { initDatabase } from './database'
 import { registerProductHandlers } from './ipc/products'
 import { registerSalesHandlers } from './ipc/sales'
@@ -189,6 +190,78 @@ app.whenReady().then(() => {
       return { success: true, data: fileName }
     } catch (error) {
       return { success: false, error: String(error) }
+    }
+  })
+
+  // =============================================================================
+  // LICENSE ACTIVATION SYSTEM — Hardware-Locked Hybrid Serverless
+  // =============================================================================
+
+  // 1. Return the immutable hardware fingerprint (UUID) for this machine
+  ipcMain.handle('system:get-hardware-id', () => {
+    try {
+      // Pass `true` to get the original machine UUID (not hashed)
+      return { success: true, data: machineIdSync(true) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // 2. Boot-time check — read is_activated directly from SQLite (tamper-proof)
+  ipcMain.handle('system:check-activation', () => {
+    try {
+      const row = db.prepare('SELECT is_activated, license_key FROM activation WHERE id = 1').get() as
+        { is_activated: number; license_key: string | null } | undefined
+      return { success: true, data: { is_activated: row?.is_activated ?? 0 } }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // 3. Activate — POST to GAS via Node fetch (CORS bypass), then atomically
+  //    commit is_activated = 1 into SQLite BEFORE resolving back to React.
+  //    This prevents a DevTools actor from intercepting the promise and
+  //    injecting a forged success payload to skip activation.
+  ipcMain.handle('system:activate-license', async (_, { licenseKey, hardwareId }: { licenseKey: string; hardwareId: string }) => {
+    try {
+      const GAS_URL = 'https://script.google.com/macros/s/1fd2TtGMpDkJuYiXELcsESHvJFqWRQPPBJIPzsdJJPEs/exec'
+
+      const response = await fetch(GAS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'activate',
+          key: licenseKey,
+          hardware_id: hardwareId,
+        }),
+        // Follow redirects — GAS Web Apps redirect once after POST
+        redirect: 'follow',
+      })
+
+      if (!response.ok) {
+        return { success: false, error: `Server responded with HTTP ${response.status}` }
+      }
+
+      const result = await response.json() as { success: boolean; message?: string }
+
+      if (!result.success) {
+        return { success: false, error: result.message || 'License key is invalid or already in use.' }
+      }
+
+      // ✔ Server confirmed — commit activation atomically to SQLite NOW,
+      //   before the IPC promise resolves. React never touches the DB.
+      db.prepare(`
+        UPDATE activation
+        SET is_activated = 1,
+            license_key  = ?,
+            hardware_id  = ?,
+            activated_at = CURRENT_TIMESTAMP
+        WHERE id = 1
+      `).run(licenseKey, hardwareId)
+
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: `Network error: ${String(error)}` }
     }
   })
 
