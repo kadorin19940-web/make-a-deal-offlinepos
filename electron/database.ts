@@ -313,6 +313,7 @@ function createTables() {
       is_activated INTEGER NOT NULL DEFAULT 0,
       license_key  TEXT,
       hardware_id  TEXT,
+      email        TEXT,
       activated_at DATETIME
     );
     INSERT OR IGNORE INTO activation (id, is_activated) VALUES (1, 0);
@@ -337,11 +338,22 @@ function runMigrations() {
         is_activated INTEGER NOT NULL DEFAULT 0,
         license_key  TEXT,
         hardware_id  TEXT,
+        email        TEXT,
         activated_at DATETIME
       );
       INSERT OR IGNORE INTO activation (id, is_activated) VALUES (1, 0);
     `)
     db.prepare("INSERT OR REPLACE INTO shop_settings (key, value) VALUES ('db_version', '2')").run()
+  }
+
+  if (currentVersion < 3) {
+    // v3: Add email column to activation table for existing installations
+    try {
+      db.exec(`ALTER TABLE activation ADD COLUMN email TEXT;`)
+    } catch (e) {
+      // Column might already exist
+    }
+    db.prepare("INSERT OR REPLACE INTO shop_settings (key, value) VALUES ('db_version', '3')").run()
   }
 }
 

@@ -172,8 +172,8 @@ const api = {
   system: {
     getHardwareId: () => ipcRenderer.invoke('system:get-hardware-id'),
     checkActivation: () => ipcRenderer.invoke('system:check-activation'),
-    activateLicense: (licenseKey: string, hardwareId: string) =>
-      ipcRenderer.invoke('system:activate-license', { licenseKey, hardwareId }),
+    activateLicense: (licenseKey: string, email: string, hardwareId: string) =>
+      ipcRenderer.invoke('system:activate-license', { licenseKey, email, hardwareId }),
   },
 }
 

@@ -8,6 +8,7 @@ type ActivationStatus = 'idle' | 'loading' | 'success'
 export default function ActivationScreen({ onActivated }: { onActivated: () => void }) {
   const [hardwareId, setHardwareId] = useState<string>('กำลังอ่านข้อมูลฮาร์ดแวร์...')
   const [licenseKey, setLicenseKey] = useState('')
+  const [email, setEmail] = useState('')
   const [status, setStatus] = useState<ActivationStatus>('idle')
 
   // Fetch hardware fingerprint on mount
@@ -24,25 +25,43 @@ export default function ActivationScreen({ onActivated }: { onActivated: () => v
     toast.success('คัดลอก Hardware ID แล้ว')
   }, [hardwareId])
 
+  const validateEmail = (input: string) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return emailRegex.test(input)
+  }
+
   const handleActivate = async () => {
-    const trimmed = licenseKey.trim()
-    if (!trimmed) {
+    const trimmedKey = licenseKey.trim()
+    const trimmedEmail = email.trim()
+
+    if (!trimmedEmail) {
+      toast.error('กรุณากรอกอีเมลก่อนดำเนินการ')
+      return
+    }
+
+    if (!validateEmail(trimmedEmail)) {
+      toast.error('รูปแบบอีเมลไม่ถูกต้อง')
+      return
+    }
+
+    if (!trimmedKey) {
       toast.error('กรุณากรอก License Key ก่อนดำเนินการ')
       return
     }
+
     if (status === 'loading') return
 
     setStatus('loading')
 
     try {
-      const res = await api.system.activateLicense(trimmed, hardwareId)
+      const res = await api.system.activateLicense(trimmedKey, trimmedEmail, hardwareId)
       if (res.success) {
         setStatus('success')
         toast.success('เปิดใช้งานซอฟต์แวร์สำเร็จ! 🎉', { duration: 3000 })
         setTimeout(onActivated, 1500)
       } else {
         setStatus('idle')
-        toast.error(res.error || 'License Key ไม่ถูกต้องหรือถูกใช้งานแล้ว', { duration: 5000 })
+        toast.error(res.error || 'License Key หรืออีเมลไม่ถูกต้อง', { duration: 5000 })
       }
     } catch (err) {
       setStatus('idle')
@@ -69,7 +88,7 @@ export default function ActivationScreen({ onActivated }: { onActivated: () => v
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-white">Make a Deal POS</h1>
           <p className="text-sm text-slate-400 mt-1.5 text-center">
-            ซอฟต์แวร์นี้ต้องการ License Key เพื่อเปิดใช้งาน<br />กรุณาติดต่อผู้จัดจำหน่ายเพื่อรับรหัส
+            ซอฟต์แวร์นี้ต้องการการยืนยันอีเมลและคีย์เพื่อเปิดใช้งาน<br />กรุณากรอกข้อมูลเพื่อลงทะเบียนเข้าใช้งานเครื่องนี้
           </p>
         </div>
 
@@ -103,6 +122,23 @@ export default function ActivationScreen({ onActivated }: { onActivated: () => v
           {/* Divider */}
           <div className="border-t border-slate-800/60" />
 
+          {/* Email input */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">
+              อีเมลผู้ซื้อ (Email)
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleActivate()}
+              placeholder="customer@example.com"
+              disabled={status === 'loading' || status === 'success'}
+              spellCheck={false}
+              className="w-full text-center text-sm rounded-xl bg-slate-950 border border-slate-700/60 text-white placeholder-slate-600 px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all duration-200 disabled:opacity-50"
+            />
+          </div>
+
           {/* License key input */}
           <div>
             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">
@@ -123,13 +159,13 @@ export default function ActivationScreen({ onActivated }: { onActivated: () => v
           {/* Activate button — state machine */}
           <button
             onClick={handleActivate}
-            disabled={status === 'loading' || status === 'success' || !licenseKey.trim()}
+            disabled={status === 'loading' || status === 'success' || !licenseKey.trim() || !email.trim()}
             className={`w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold tracking-wide transition-all duration-300 ${
               status === 'success'
                 ? 'bg-green-500/20 border border-green-500/30 text-green-400 cursor-default'
                 : status === 'loading'
                 ? 'bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 cursor-not-allowed'
-                : !licenseKey.trim()
+                : !licenseKey.trim() || !email.trim()
                 ? 'bg-slate-800/60 border border-slate-700/40 text-slate-600 cursor-not-allowed'
                 : 'bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/50 hover:border-indigo-400 text-white shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/30 cursor-pointer'
             }`}

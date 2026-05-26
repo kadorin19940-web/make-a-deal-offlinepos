@@ -222,7 +222,7 @@ app.whenReady().then(() => {
   //    commit is_activated = 1 into SQLite BEFORE resolving back to React.
   //    This prevents a DevTools actor from intercepting the promise and
   //    injecting a forged success payload to skip activation.
-  ipcMain.handle('system:activate-license', async (_, { licenseKey, hardwareId }: { licenseKey: string; hardwareId: string }) => {
+  ipcMain.handle('system:activate-license', async (_, { licenseKey, email, hardwareId }: { licenseKey: string; email: string; hardwareId: string }) => {
     try {
       const GAS_URL = 'https://script.google.com/macros/s/AKfycbzJDGal71Cz4srjNHd5cPYKKOPQuzY84AZHZAAfhNY56r5VNTP-jsjsYWC3VtNu1g4l4g/exec'
 
@@ -232,6 +232,7 @@ app.whenReady().then(() => {
         body: JSON.stringify({
           action: 'activate',
           key: licenseKey,
+          email: email,
           hardware_id: hardwareId,
         }),
         // Follow redirects — GAS Web Apps redirect once after POST
@@ -255,9 +256,10 @@ app.whenReady().then(() => {
         SET is_activated = 1,
             license_key  = ?,
             hardware_id  = ?,
+            email        = ?,
             activated_at = CURRENT_TIMESTAMP
         WHERE id = 1
-      `).run(licenseKey, hardwareId)
+      `).run(licenseKey, hardwareId, email)
 
       return { success: true }
     } catch (error) {
