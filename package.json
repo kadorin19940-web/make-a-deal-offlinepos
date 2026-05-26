@@ -7,14 +7,14 @@
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "dev:vite": "vite",
     "dev:electron": "wait-on http://localhost:5173 && electron .",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && tsc -p tsconfig.electron.json",
     "build:electron": "tsc -p tsconfig.electron.json",
     "start": "electron .",
-    "dist:win": "npm run build:all && npx electron-builder --win",
-    "dist:mac": "npm run build:all && npx electron-builder --mac",
-    "dist:linux": "npm run build:all && npx electron-builder --linux",
+    "dist:win": "npm run build && npx electron-builder --win",
+    "dist:mac": "npm run build && npx electron-builder --mac",
+    "dist:linux": "npm run build && npx electron-builder --linux",
     "preview": "vite preview",
-    "build:all": "npm run build && npx tsc -p tsconfig.electron.json"
+    "build:all": "npm run build"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

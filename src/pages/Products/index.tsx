@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Plus, Search, Edit2, Trash2, Package, Grid, List, Download, Upload, X, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { Product, Category } from '../../types'
+import { useAuthStore } from '../../store'
 
 const api = (window as any).api
 
@@ -28,6 +29,9 @@ export default function ProductsPage() {
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table')
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Product | null>(null)
+  
+  const { user: currentUser } = useAuthStore()
+  const isAdmin = currentUser?.role?.toLowerCase() === 'admin'
 
   useEffect(() => { loadData() }, [])
 
@@ -46,7 +50,7 @@ export default function ProductsPage() {
 
   const deleteProduct = async (id: number) => {
     if (!confirm('ต้องการลบสินค้านี้?')) return
-    if (api) { await api.products.delete(id) }
+    if (api) { await api.products.delete(id, currentUser?.id) }
     setProducts(p => p.filter(x => x.id !== id))
     toast.success('ลบสินค้าแล้ว')
   }
@@ -66,11 +70,15 @@ export default function ProductsPage() {
           <button onClick={() => setViewMode('table')} className={`glass-btn ${viewMode === 'table' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: '8px 12px' }}><List size={15} /></button>
           <button onClick={() => setViewMode('grid')} className={`glass-btn ${viewMode === 'grid' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: '8px 12px' }}><Grid size={15} /></button>
         </div>
-        <button className="glass-btn btn-secondary" style={{ padding: '8px 14px', fontSize: 13 }}><Download size={14} />ส่งออก</button>
-        <button className="glass-btn btn-secondary" style={{ padding: '8px 14px', fontSize: 13 }}><Upload size={14} />นำเข้า</button>
-        <button onClick={() => { setEditing(null); setShowModal(true) }} className="glass-btn btn-primary" style={{ padding: '8px 16px', fontSize: 13, fontWeight: 700 }}>
-          <Plus size={15} />เพิ่มสินค้า
-        </button>
+        {isAdmin && (
+          <>
+            <button className="glass-btn btn-secondary" style={{ padding: '8px 14px', fontSize: 13 }}><Download size={14} />ส่งออก</button>
+            <button className="glass-btn btn-secondary" style={{ padding: '8px 14px', fontSize: 13 }}><Upload size={14} />นำเข้า</button>
+            <button onClick={() => { setEditing(null); setShowModal(true) }} className="glass-btn btn-primary" style={{ padding: '8px 16px', fontSize: 13, fontWeight: 700 }}>
+              <Plus size={15} />เพิ่มสินค้า
+            </button>
+          </>
+        )}
       </div>
 
       {/* Category filter pills */}
@@ -165,14 +173,16 @@ export default function ProductsPage() {
                       </span>
                     </td>
                     <td>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button onClick={() => { setEditing(p); setShowModal(true) }} style={{ padding: '5px', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 6, cursor: 'pointer', color: '#60a5fa', display: 'flex' }}>
-                          <Edit2 size={13} />
-                        </button>
-                        <button onClick={() => deleteProduct(p.id)} style={{ padding: '5px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', color: '#fca5a5', display: 'flex' }}>
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
+                      {isAdmin && (
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button onClick={() => { setEditing(p); setShowModal(true) }} style={{ padding: '5px', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 6, cursor: 'pointer', color: '#60a5fa', display: 'flex' }}>
+                            <Edit2 size={13} />
+                          </button>
+                          <button onClick={() => deleteProduct(p.id)} style={{ padding: '5px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', color: '#fca5a5', display: 'flex' }}>
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 )
@@ -189,8 +199,27 @@ export default function ProductsPage() {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
           {filtered.map(p => (
-            <div key={p.id} className="glass-card" style={{ padding: 16, cursor: 'pointer' }} onClick={() => { setEditing(p); setShowModal(true) }}>
-              <div style={{ fontSize: 28, marginBottom: 8 }}>{p.category_icon || '📦'}</div>
+            <div key={p.id} className="glass-card" style={{ padding: 16, cursor: isAdmin ? 'pointer' : 'default' }} onClick={() => { if (isAdmin) { setEditing(p); setShowModal(true) } }}>
+              <div style={{ fontSize: 28, marginBottom: 8 }}>
+                {p.image_path ? (
+                  <img 
+                    src={`local-img://${p.image_path}`} 
+                    alt={p.name} 
+                    className="w-12 h-12 object-cover rounded-lg border border-white/10" 
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      const pNode = e.currentTarget.parentNode as HTMLElement;
+                      if (pNode) {
+                        const fallbackSpan = document.createElement('span');
+                        fallbackSpan.innerText = p.category_icon || '📦';
+                        pNode.appendChild(fallbackSpan);
+                      }
+                    }}
+                  />
+                ) : (
+                  p.category_icon || '📦'
+                )}
+              </div>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.9)', marginBottom: 4 }}>{p.name}</div>
               <div style={{ fontSize: 15, fontWeight: 800, color: '#22c55e' }}>฿{p.sell_price.toLocaleString()}</div>
               <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 4 }}>สต็อก: {p.is_service ? '—' : p.stock_qty}</div>
@@ -207,8 +236,8 @@ export default function ProductsPage() {
           onClose={() => setShowModal(false)}
           onSave={async (data) => {
             if (api) {
-              if (editing) await api.products.update(editing.id, data)
-              else await api.products.create(data)
+              if (editing) await api.products.update(editing.id, data, currentUser?.id)
+              else await api.products.create(data, currentUser?.id)
             }
             toast.success(editing ? 'แก้ไขสินค้าแล้ว' : 'เพิ่มสินค้าแล้ว')
             setShowModal(false)
@@ -233,9 +262,48 @@ function ProductModal({ product, categories, onClose, onSave }: {
     stock_qty: product?.stock_qty || 0, min_stock: product?.min_stock || 0,
     is_service: product?.is_service || 0, is_active: product?.is_active ?? 1,
     tax_rate: product?.tax_rate || 7,
+    image_path: product?.image_path || '',
+    image_path_preview: product?.image_path ? `local-img://${product.image_path}` : '',
   })
+  
+  const [isDragActive, setIsDragActive] = useState(false)
 
   const set = (k: string, v: unknown) => setForm(f => ({ ...f, [k]: v }))
+
+  const handleImageFile = async (file: File) => {
+    // 1. Size Check (5MB Limit)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('ไฟล์รูปภาพมีขนาดใหญ่เกินไป! (จำกัดไม่เกิน 5MB)')
+      return
+    }
+    // 2. Type Check
+    if (!file.type.startsWith('image/')) {
+      toast.error('กรุณาเลือกไฟล์ที่เป็นรูปภาพเท่านั้น')
+      return
+    }
+
+    try {
+      const filePath = (file as any).path
+      if (api && filePath) {
+        const uploadRes = await api.images.upload(filePath)
+        if (uploadRes.success && uploadRes.data) {
+          set('image_path', uploadRes.data)
+          set('image_path_preview', URL.createObjectURL(file))
+          toast.success('อัปโหลดและเตรียมไฟล์รูปภาพเรียบร้อยแล้ว')
+        } else {
+          throw new Error(uploadRes.error || 'ย้ายไฟล์ไม่สำเร็จ')
+        }
+      } else {
+        // Fallback for browser
+        set('image_path', file.name)
+        set('image_path_preview', URL.createObjectURL(file))
+        toast.success('อัปโหลดรูปภาพสำเร็จ (Demo)')
+      }
+    } catch (error) {
+      console.error(error)
+      toast.error(`ไม่สามารถอัปโหลดรูปภาพได้: ${String(error)}`)
+    }
+  }
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -247,6 +315,75 @@ function ProductModal({ product, categories, onClose, onSave }: {
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.4)' }}><X size={18} /></button>
         </div>
         <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          
+          {/* Image Upload Dropzone (Tailwind CSS Dash Border & Hover effects) */}
+          <FormRow label="รูปภาพสินค้า">
+            <div 
+              onDragOver={(e) => { e.preventDefault(); setIsDragActive(true); }}
+              onDragLeave={() => setIsDragActive(false)}
+              onDrop={async (e) => {
+                e.preventDefault();
+                setIsDragActive(false);
+                const file = e.dataTransfer.files[0];
+                if (file) handleImageFile(file);
+              }}
+              onClick={() => document.getElementById('product-image-input')?.click()}
+              className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all duration-200 ${
+                isDragActive 
+                  ? 'border-green-500 bg-green-500/10' 
+                  : 'border-white/10 hover:border-green-500/50 bg-white/5 hover:bg-white/10'
+              }`}
+            >
+              <input 
+                id="product-image-input"
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleImageFile(file);
+                }}
+                style={{ display: 'none' }}
+              />
+              
+              {form.image_path ? (
+                <div style={{ display: 'flex', justifyContent: 'center', position: 'relative' }}>
+                  <img 
+                    src={form.image_path_preview} 
+                    alt="Preview" 
+                    style={{ width: 100, height: 100, objectFit: 'cover', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}
+                  />
+                  <button 
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      set('image_path', '');
+                      set('image_path_preview', '');
+                    }}
+                    style={{
+                      position: 'absolute', top: -8, right: 'calc(50% - 58px)',
+                      background: '#ef4444', color: '#fff', border: 'none',
+                      borderRadius: '50%', width: 22, height: 22, display: 'flex',
+                      alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                      boxShadow: '0 2px 6px rgba(0,0,0,0.4)'
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '10px 0' }}>
+                  <Download size={24} style={{ color: 'rgba(255,255,255,0.3)', transform: 'rotate(180deg)' }} />
+                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', fontWeight: 500 }}>
+                    ลากรูปภาพมาวางที่นี่ หรือคลิกเพื่ออัปโหลด
+                  </span>
+                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)' }}>
+                    จำกัดขนาดไฟล์ไม่เกิน 5MB (PNG, JPG)
+                  </span>
+                </div>
+              )}
+            </div>
+          </FormRow>
+
           <FormRow label="ชื่อสินค้า *">
             <input className="glass-input" value={form.name} onChange={e => set('name', e.target.value)} placeholder="ชื่อสินค้า" />
           </FormRow>

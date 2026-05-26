@@ -1,5 +1,32 @@
-import { ipcMain } from 'electron'
+import { ipcMain, app } from 'electron'
 import Database from 'better-sqlite3'
+import path from 'path'
+import fs from 'fs'
+
+// Secure helper to double-check user role from SQLite DB
+const checkAdmin = (db: Database.Database, userId: number | undefined): boolean => {
+  if (!userId) return false
+  try {
+    const user = db.prepare('SELECT role FROM users WHERE id = ? AND is_active = 1').get(userId) as { role: string } | undefined
+    return !!user && user.role.toLowerCase() === 'admin'
+  } catch {
+    return false
+  }
+}
+
+// Garbage collection helper to delete unlinked images from userData/images
+const deleteImageFile = (fileName: string | undefined) => {
+  if (!fileName) return
+  try {
+    const imagesDir = path.join(app.getPath('userData'), 'images')
+    const filePath = path.join(imagesDir, fileName)
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath)
+    }
+  } catch (error) {
+    console.error('Failed to delete image file:', error)
+  }
+}
 
 export function registerProductHandlers(db: Database.Database) {
   // Get all products with optional filters
@@ -69,8 +96,11 @@ export function registerProductHandlers(db: Database.Database) {
     }
   })
 
-  ipcMain.handle('products:create', (_, data: Record<string, unknown>) => {
+  ipcMain.handle('products:create', (_, data: Record<string, unknown>, userId?: number) => {
     try {
+      if (!checkAdmin(db, userId)) {
+        return { success: false, error: 'Unauthorized: Admin privileges required to create products.' }
+      }
       const stmt = db.prepare(`
         INSERT INTO products (barcode, sku, name, name_en, description, category_id, unit,
           cost_price, sell_price, sell_price2, sell_price3, stock_qty, min_stock, max_stock,
@@ -86,8 +116,20 @@ export function registerProductHandlers(db: Database.Database) {
     }
   })
 
-  ipcMain.handle('products:update', (_, id: number, data: Record<string, unknown>) => {
+  ipcMain.handle('products:update', (_, id: number, data: Record<string, unknown>, userId?: number) => {
     try {
+      if (!checkAdmin(db, userId)) {
+        return { success: false, error: 'Unauthorized: Admin privileges required to update products.' }
+      }
+
+      // Garbage Collection: delete old image file if image_path is changing
+      if (data.image_path !== undefined) {
+        const oldProd = db.prepare('SELECT image_path FROM products WHERE id = ?').get(id) as { image_path?: string } | undefined
+        if (oldProd && oldProd.image_path && oldProd.image_path !== data.image_path) {
+          deleteImageFile(oldProd.image_path)
+        }
+      }
+
       const fields = Object.keys(data).map(k => `${k} = @${k}`).join(', ')
       db.prepare(`UPDATE products SET ${fields}, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ ...data, id })
       return { success: true }
@@ -96,9 +138,19 @@ export function registerProductHandlers(db: Database.Database) {
     }
   })
 
-  ipcMain.handle('products:delete', (_, id: number) => {
+  ipcMain.handle('products:delete', (_, id: number, userId?: number) => {
     try {
-      db.prepare('UPDATE products SET is_active = 0 WHERE id = ?').run(id)
+      if (!checkAdmin(db, userId)) {
+        return { success: false, error: 'Unauthorized: Admin privileges required to delete products.' }
+      }
+
+      // Garbage Collection: delete associated image file on soft delete
+      const oldProd = db.prepare('SELECT image_path FROM products WHERE id = ?').get(id) as { image_path?: string } | undefined
+      if (oldProd && oldProd.image_path) {
+        deleteImageFile(oldProd.image_path)
+      }
+
+      db.prepare('UPDATE products SET is_active = 0, image_path = NULL WHERE id = ?').run(id)
       return { success: true }
     } catch (error) {
       return { success: false, error: String(error) }

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { initDatabase } from './database'
@@ -13,6 +13,11 @@ import { registerSessionHandlers } from './ipc/sessions'
 import { registerPromotionHandlers } from './ipc/promotions'
 import { registerSupplierHandlers } from './ipc/suppliers'
 import { registerBackupHandlers } from './ipc/backup'
+
+// Register local-img scheme as privileged before app is ready
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'local-img', privileges: { bypassCSP: true, secure: true, supportFetchAPI: true } }
+])
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
@@ -120,6 +125,89 @@ app.whenReady().then(() => {
       return { success: true, data }
     } catch (error) {
       return { success: false, error: String(error) }
+    }
+  })
+
+  // Excel binary writer
+  ipcMain.handle('fs:writeExcel', async (_, filePath: string, base64Data: string) => {
+    try {
+      fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'))
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // Hardware Cash Drawer Integration via SerialPort (Standard 9600 baud open/pulse/close)
+  ipcMain.handle('hardware:open-drawer', async (_, comPort: string) => {
+    try {
+      // Dynamic import to prevent app boot crashes if native module compilation fails
+      const { SerialPort } = require('serialport')
+      const port = new SerialPort({
+        path: comPort,
+        baudRate: 9600,
+        autoOpen: false
+      })
+
+      return new Promise((resolve) => {
+        port.open((err: any) => {
+          if (err) {
+            resolve({ success: false, error: `Failed to open port: ${String(err)}` })
+            return
+          }
+
+          // Open drawer standard electrical pulse trigger byte
+          port.write(Buffer.from([0x01]), (writeErr: any) => {
+            // CRITICAL: Close the port immediately to avoid "Port Busy" resource leaks
+            port.close(() => {
+              if (writeErr) {
+                resolve({ success: false, error: `Write failed: ${String(writeErr)}` })
+              } else {
+                resolve({ success: true })
+              }
+            })
+          })
+        })
+      })
+    } catch (error) {
+      return { success: false, error: `Hardware driver error: ${String(error)}` }
+    }
+  })
+
+  // Image uploader handler (moves file from source path to userData/images)
+  ipcMain.handle('images:upload', async (_, sourcePath: string) => {
+    try {
+      const imagesDir = path.join(app.getPath('userData'), 'images')
+      if (!fs.existsSync(imagesDir)) {
+        fs.mkdirSync(imagesDir, { recursive: true })
+      }
+      const ext = path.extname(sourcePath) || '.jpg'
+      const fileName = `img_${Date.now()}_${Math.floor(Math.random() * 1000)}${ext}`
+      const targetPath = path.join(imagesDir, fileName)
+      
+      fs.copyFileSync(sourcePath, targetPath)
+      return { success: true, data: fileName }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // Register custom protocol for local images from userData/images using net.fetch
+  protocol.handle('local-img', (request) => {
+    try {
+      const url = new URL(request.url)
+      const decodedPath = decodeURIComponent(url.host + url.pathname)
+      const imagesDir = path.join(app.getPath('userData'), 'images')
+      const absolutePath = path.isAbsolute(decodedPath) ? decodedPath : path.join(imagesDir, decodedPath)
+
+      // Safety check to ensure we only read from images folder
+      if (!absolutePath.startsWith(imagesDir)) {
+        return new Response('Access Denied', { status: 403 })
+      }
+
+      return net.fetch(`file:///${absolutePath}`)
+    } catch (error) {
+      return new Response(String(error), { status: 500 })
     }
   })
 

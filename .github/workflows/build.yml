@@ -29,13 +29,9 @@ jobs:
         # Node 20 has prebuilt better-sqlite3 binaries, so host-installation is fast and stable
         run: npm ci
 
-      - name: Build React frontend (Vite)
-        # Compiles the React + TypeScript app and outputs static files to /dist
+      - name: Build production application
+        # Compiles both the React frontend and the Electron backend (main/IPC) into their respective output folders
         run: npm run build
-
-      - name: Compile Electron backend (TypeScript)
-        # Compiles the Electron main-process & IPC handlers to /dist-electron
-        run: npm run build:electron
 
       - name: Rebuild native C++ modules for Electron
         # CRITICAL: Rebuilds better-sqlite3 specifically targeting the target Electron version

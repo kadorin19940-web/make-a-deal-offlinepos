@@ -69,6 +69,48 @@ export default function POSPage() {
     return () => window.removeEventListener('keydown', handleKey)
   }, [items.length])
 
+  // Global Barcode Scanner Listener
+  useEffect(() => {
+    let buffer = ''
+    let lastKeyTime = Date.now()
+
+    const handleGlobalScan = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return
+      }
+
+      const currentTime = Date.now()
+      if (currentTime - lastKeyTime > 100) {
+        buffer = '' // Reset if typing delay is too long (human typing)
+      }
+      lastKeyTime = currentTime
+
+      if (e.key === 'Enter') {
+        if (buffer.trim().length > 1) {
+          e.preventDefault()
+          handleBarcodeScanned(buffer.trim())
+          buffer = ''
+        }
+      } else if (e.key.length === 1) {
+        buffer += e.key
+      }
+    }
+
+    window.addEventListener('keydown', handleGlobalScan)
+    return () => window.removeEventListener('keydown', handleGlobalScan)
+  }, [products])
+
+  const handleBarcodeScanned = (barcode: string) => {
+    const product = products.find(p => p.barcode === barcode || p.sku === barcode)
+    if (product) {
+      addToCart(product)
+      toast.success(`สแกนบาร์โค้ดสำเร็จ: ${product.name}`)
+    } else {
+      toast.error(`ไม่พบสินค้าสำหรับบาร์โค้ด: ${barcode}`)
+    }
+  }
+
   const loadCategories = async () => {
     if (!api) {
       // Mock data for browser
@@ -250,6 +292,29 @@ export default function POSPage() {
           </span>
 
           <div style={{ flex: 1 }} />
+
+          {/* Manual Drawer Trigger (Admin Only) */}
+          {user?.role?.toLowerCase() === 'admin' && (
+            <button
+              onClick={async () => {
+                try {
+                  const comPort = settings.cash_drawer_port || 'COM1'
+                  const res = await (window as any).api.hardware.openDrawer(comPort)
+                  if (res.success) {
+                    toast.success('เปิดลิ้นชักเงินสด (Manual) สำเร็จ')
+                  } else {
+                    toast.error(`เปิดลิ้นชักล้มเหลว: ${res.error}`)
+                  }
+                } catch (e) {
+                  toast.error(`ข้อผิดพลาดฮาร์ดแวร์: ${String(e)}`)
+                }
+              }}
+              className="px-3 py-1.5 bg-amber-950/40 border border-amber-500/30 hover:border-amber-500 text-amber-500 hover:text-amber-400 hover:bg-amber-950/60 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all duration-200 shadow-md shadow-amber-950/20"
+            >
+              <Zap size={12} />
+              เปิดลิ้นชักเงินสด
+            </button>
+          )}
 
           {/* Customer */}
           <button
@@ -567,7 +632,22 @@ export default function POSPage() {
           couponCode={coupon?.code}
           userId={user?.id}
           onClose={() => setShowPayment(false)}
-          onSuccess={() => {
+          onSuccess={async () => {
+            // Safe hardware cash drawer activation
+            if (settings.cash_drawer_enabled === 'true') {
+              try {
+                const comPort = settings.cash_drawer_port || 'COM1'
+                const res = await (window as any).api.hardware.openDrawer(comPort)
+                if (res.success) {
+                  toast.success('เปิดลิ้นชักเก็บเงินอัตโนมัติสำเร็จ')
+                } else {
+                  toast.error(`เปิดลิ้นชักเก็บเงินล้มเหลว: ${res.error}`)
+                }
+              } catch (err) {
+                console.error('Cash drawer hardware trigger failed:', err)
+                toast.error('ฮาร์ดแวร์เปิดลิ้นชักเก็บเงินเกิดข้อผิดพลาด')
+              }
+            }
             clearCart()
             setShowPayment(false)
             toast.success('ชำระเงินสำเร็จ! 🎉', { duration: 3000 })

@@ -80,6 +80,7 @@ const api = {
     getVATReport: (filters: Record<string, unknown>) => ipcRenderer.invoke('reports:getVATReport', filters),
     getDashboardStats: () => ipcRenderer.invoke('reports:getDashboardStats'),
     getShiftSummary: (sessionId: number) => ipcRenderer.invoke('reports:getShiftSummary', sessionId),
+    exportSalesExcel: (startDate: string, endDate: string, filePath: string, userId: number) => ipcRenderer.invoke('reports:exportSalesExcel', { from_date: startDate, to_date: endDate, filePath, userId }),
   },
 
   // Settings
@@ -154,6 +155,17 @@ const api = {
   fs: {
     writeFile: (filePath: string, data: string) => ipcRenderer.invoke('fs:writeFile', filePath, data),
     readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
+    writeExcel: (filePath: string, base64Data: string) => ipcRenderer.invoke('fs:writeExcel', filePath, base64Data),
+  },
+
+  // Images
+  images: {
+    upload: (sourcePath: string) => ipcRenderer.invoke('images:upload', sourcePath),
+  },
+
+  // Hardware
+  hardware: {
+    openDrawer: (comPort: string) => ipcRenderer.invoke('hardware:open-drawer', comPort),
   },
 }
 

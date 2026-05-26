@@ -1,5 +1,65 @@
-import { ipcMain } from 'electron'
+import { ipcMain, app } from 'electron'
 import Database from 'better-sqlite3'
+import path from 'path'
+import fs from 'fs'
+import * as XLSX from 'xlsx'
+
+// Secure helper to double-check user role from SQLite DB
+const checkAdmin = (db: Database.Database, userId: number | undefined): boolean => {
+  if (!userId) return false
+  try {
+    const user = db.prepare('SELECT role FROM users WHERE id = ? AND is_active = 1').get(userId) as { role: string } | undefined
+    return !!user && user.role.toLowerCase() === 'admin'
+  } catch {
+    return false
+  }
+}
+
+// Garbage collection helper to delete unlinked images from userData/images
+const deleteImageFile = (fileName: string | undefined) => {
+  if (!fileName) return
+  try {
+    const imagesDir = path.join(app.getPath('userData'), 'images')
+    const filePath = path.join(imagesDir, fileName)
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath)
+    }
+  } catch (error) {
+    console.error('Failed to delete image file:', error)
+  }
+}
+
+// Helper utilities for ShopSettings type-casting
+const BOOLEAN_KEYS = ['vat_enabled', 'vat_inclusive', 'auto_print', 'backup_enabled', 'low_stock_alert']
+const NUMBER_KEYS = ['vat_rate', 'points_per_baht', 'baht_per_point', 'pin_lock_minutes', 'backup_interval_hours']
+
+export function castSettingsGet(raw: Record<string, string>): Record<string, unknown> {
+  const casted: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    if (BOOLEAN_KEYS.includes(key)) {
+      casted[key] = value === 'true' || value === '1'
+    } else if (NUMBER_KEYS.includes(key)) {
+      casted[key] = Number(value) || 0
+    } else {
+      casted[key] = value
+    }
+  }
+  return casted
+}
+
+export function castSettingsSave(settings: Record<string, unknown>): Record<string, string> {
+  const converted: Record<string, string> = {}
+  for (const [key, value] of Object.entries(settings)) {
+    if (typeof value === 'boolean') {
+      converted[key] = value ? 'true' : 'false'
+    } else if (typeof value === 'number') {
+      converted[key] = String(value)
+    } else {
+      converted[key] = String(value ?? '')
+    }
+  }
+  return converted
+}
 
 export function registerCustomerHandlers(db: Database.Database) {
   ipcMain.handle('customers:getAll', (_, filters: Record<string, unknown> = {}) => {
@@ -233,39 +293,63 @@ export function registerReportHandlers(db: Database.Database) {
     } catch (error) { return { success: false, error: String(error) } }
   })
 
-  ipcMain.handle('reports:getSalesSummary', (_, filters: Record<string, unknown>) => {
+  ipcMain.handle('reports:getSalesSummary', (_, filters: Record<string, any>) => {
     try {
+      if (!checkAdmin(db, filters.userId)) {
+        return { success: false, error: 'Unauthorized: Admin privileges required.' }
+      }
+
       const summary = db.prepare(`
         SELECT 
           COUNT(*) as bill_count,
           COALESCE(SUM(total), 0) as total_revenue,
           COALESCE(SUM(total - discount_amount), 0) as net_revenue,
           COALESCE(SUM(tax_amount), 0) as total_tax,
-          COALESCE(AVG(total), 0) as avg_bill
+          COALESCE(AVG(total), 0) as avg_bill,
+          (
+            SELECT COALESCE(SUM(si.total - (si.qty * si.cost_price)), 0)
+            FROM sale_items si
+            JOIN sales s ON si.sale_id = s.id
+            WHERE DATE(s.sale_date) BETWEEN ? AND ? AND s.status = 'completed'
+          ) as total_profit
         FROM sales 
         WHERE DATE(sale_date) BETWEEN ? AND ? AND status = 'completed'
-      `).get(filters.from_date, filters.to_date) as Record<string, number>
+      `).get(filters.from_date, filters.to_date, filters.from_date, filters.to_date) as Record<string, number>
 
       return { success: true, data: summary }
     } catch (error) { return { success: false, error: String(error) } }
   })
 
-  ipcMain.handle('reports:getSalesChart', (_, filters: Record<string, unknown>) => {
+  ipcMain.handle('reports:getSalesChart', (_, filters: Record<string, any>) => {
     try {
+      if (!checkAdmin(db, filters.userId)) {
+        return { success: false, error: 'Unauthorized: Admin privileges required.' }
+      }
+
       const chart = db.prepare(`
-        SELECT DATE(sale_date) as date, 
-          COALESCE(SUM(total), 0) as total,
-          COUNT(*) as count
-        FROM sales 
-        WHERE DATE(sale_date) BETWEEN ? AND ? AND status = 'completed'
-        GROUP BY DATE(sale_date) ORDER BY date ASC
+        SELECT DATE(s.sale_date) as date, 
+          COALESCE(SUM(s.total), 0) as total,
+          COUNT(s.id) as count,
+          COALESCE((
+            SELECT SUM(si.total - (si.qty * si.cost_price))
+            FROM sale_items si
+            JOIN sales s2 ON si.sale_id = s2.id
+            WHERE DATE(s2.sale_date) = DATE(s.sale_date) AND s2.status = 'completed'
+          ), 0) as profit
+        FROM sales s
+        WHERE DATE(s.sale_date) BETWEEN ? AND ? AND s.status = 'completed'
+        GROUP BY DATE(s.sale_date) ORDER BY date ASC
       `).all(filters.from_date, filters.to_date)
       return { success: true, data: chart }
     } catch (error) { return { success: false, error: String(error) } }
   })
 
-  ipcMain.handle('reports:getTopProducts', (_, filters: Record<string, unknown>) => {
+  ipcMain.handle('reports:getTopProducts', (_, filters: Record<string, any>) => {
     try {
+      if (!checkAdmin(db, filters.userId)) {
+        return { success: false, error: 'Unauthorized: Admin privileges required.' }
+      }
+
       const products = db.prepare(`
         SELECT si.product_name, si.product_id,
           SUM(si.qty) as qty_sold,
@@ -281,8 +365,12 @@ export function registerReportHandlers(db: Database.Database) {
     } catch (error) { return { success: false, error: String(error) } }
   })
 
-  ipcMain.handle('reports:getTopCustomers', (_, filters: Record<string, unknown>) => {
+  ipcMain.handle('reports:getTopCustomers', (_, filters: Record<string, any>) => {
     try {
+      if (!checkAdmin(db, filters.userId)) {
+        return { success: false, error: 'Unauthorized: Admin privileges required.' }
+      }
+
       const customers = db.prepare(`
         SELECT c.id, c.name, c.phone, c.customer_type,
           COUNT(s.id) as visit_count,
@@ -318,13 +406,99 @@ export function registerReportHandlers(db: Database.Database) {
       return { success: true, data: { summary, products } }
     } catch (error) { return { success: false, error: String(error) } }
   })
+
+  // Advanced Export to Excel with Date Range Filter and Anti-Memory Leak protection
+  ipcMain.handle('reports:exportSalesExcel', async (_, filters: { from_date: string; to_date: string; filePath: string; userId: number }) => {
+    try {
+      if (!checkAdmin(db, filters.userId)) {
+        return { success: false, error: 'Unauthorized: Admin privileges required.' }
+      }
+
+      const { from_date, to_date, filePath } = filters
+      const ws = XLSX.utils.json_to_sheet([])
+
+      // Write Header
+      const headers = [
+        "ID",
+        "เลขที่ใบเสร็จ",
+        "วันที่-เวลา",
+        "ชื่อลูกค้า",
+        "แคชเชียร์",
+        "ยอดรวมก่อนส่วนลด (บาท)",
+        "ส่วนลด (บาท)",
+        "ภาษี (บาท)",
+        "ยอดสุทธิรวม (บาท)",
+        "วิธีชำระเงิน",
+        "สถานะ",
+        "หมายเหตุ"
+      ]
+      XLSX.utils.sheet_add_aoa(ws, [headers], { origin: 'A1' })
+      let rowCount = 1
+
+      // Fetch in chunks
+      let offset = 0
+      const limit = 1000
+
+      while (true) {
+        const rows = db.prepare(`
+          SELECT s.id, s.receipt_no, s.sale_date, c.name as customer_name, u.name as cashier_name,
+                 s.subtotal, s.discount_amount, s.tax_amount, s.total, s.payment_method, s.status, s.note
+          FROM sales s
+          LEFT JOIN customers c ON s.customer_id = c.id
+          LEFT JOIN users u ON s.user_id = u.id
+          WHERE DATE(s.sale_date) BETWEEN ? AND ?
+          ORDER BY s.id ASC
+          LIMIT ? OFFSET ?
+        `).all(from_date, to_date, limit, offset) as any[]
+
+        if (rows.length === 0) break
+
+        const mapped = rows.map(r => [
+          r.id,
+          r.receipt_no,
+          r.sale_date,
+          r.customer_name || 'ลูกค้าทั่วไป',
+          r.cashier_name || 'ไม่ระบุ',
+          Number(r.subtotal) || 0,
+          Number(r.discount_amount) || 0,
+          Number(r.tax_amount) || 0,
+          Number(r.total) || 0,
+          r.payment_method,
+          r.status === 'completed' ? 'เสร็จสิ้น' : 'ยกเลิก',
+          r.note || ''
+        ])
+
+        XLSX.utils.sheet_add_aoa(ws, mapped, { origin: `A${rowCount + 1}` })
+        rowCount += rows.length
+        offset += limit
+
+        // Yield execution to keep the app responsive
+        await new Promise(resolve => setTimeout(resolve, 5))
+      }
+
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'รายงานสรุปยอดขาย')
+      
+      const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' })
+      fs.writeFileSync(filePath, buffer)
+
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
 }
 
 export function registerSettingsHandlers(db: Database.Database) {
   ipcMain.handle('settings:get', (_, key: string) => {
     try {
       const row = db.prepare('SELECT value FROM shop_settings WHERE key = ?').get(key) as { value: string } | undefined
-      return { success: true, data: row?.value }
+      let val: any = row?.value
+      if (val !== undefined) {
+        if (BOOLEAN_KEYS.includes(key)) val = val === 'true' || val === '1'
+        else if (NUMBER_KEYS.includes(key)) val = Number(val) || 0
+      }
+      return { success: true, data: val }
     } catch (error) { return { success: false, error: String(error) } }
   })
 
@@ -333,24 +507,55 @@ export function registerSettingsHandlers(db: Database.Database) {
       const rows = db.prepare('SELECT key, value FROM shop_settings').all() as { key: string; value: string }[]
       const data: Record<string, string> = {}
       for (const row of rows) data[row.key] = row.value
-      return { success: true, data }
+      // Apply type casting middleware on Get
+      const castedData = castSettingsGet(data)
+      return { success: true, data: castedData }
     } catch (error) { return { success: false, error: String(error) } }
   })
 
-  ipcMain.handle('settings:set', (_, key: string, value: unknown) => {
+  ipcMain.handle('settings:set', (_, key: string, value: unknown, userId?: number) => {
     try {
-      db.prepare('INSERT OR REPLACE INTO shop_settings (key, value) VALUES (?, ?)').run(key, String(value))
+      if (!checkAdmin(db, userId)) {
+        return { success: false, error: 'Unauthorized: Admin privileges required.' }
+      }
+
+      // Garbage Collection: Delete old logo if shop_logo changes
+      if (key === 'shop_logo') {
+        const oldLogo = db.prepare("SELECT value FROM shop_settings WHERE key = 'shop_logo'").get() as { value: string } | undefined
+        if (oldLogo && oldLogo.value && oldLogo.value !== value) {
+          deleteImageFile(oldLogo.value)
+        }
+      }
+
+      let saveVal = String(value)
+      if (typeof value === 'boolean') saveVal = value ? 'true' : 'false'
+
+      db.prepare('INSERT OR REPLACE INTO shop_settings (key, value) VALUES (?, ?)').run(key, saveVal)
       return { success: true }
     } catch (error) { return { success: false, error: String(error) } }
   })
 
-  ipcMain.handle('settings:setMultiple', (_, data: Record<string, unknown>) => {
+  ipcMain.handle('settings:setMultiple', (_, data: Record<string, unknown>, userId?: number) => {
     try {
+      if (!checkAdmin(db, userId)) {
+        return { success: false, error: 'Unauthorized: Admin privileges required.' }
+      }
+
+      // Garbage Collection: Delete old logo if shop_logo changes
+      if (data.shop_logo) {
+        const oldLogo = db.prepare("SELECT value FROM shop_settings WHERE key = 'shop_logo'").get() as { value: string } | undefined
+        if (oldLogo && oldLogo.value && oldLogo.value !== data.shop_logo) {
+          deleteImageFile(oldLogo.value)
+        }
+      }
+
+      // Apply type casting middleware on Save
+      const converted = castSettingsSave(data)
       const stmt = db.prepare('INSERT OR REPLACE INTO shop_settings (key, value) VALUES (?, ?)')
-      const setAll = db.transaction((d: Record<string, unknown>) => {
-        for (const [k, v] of Object.entries(d)) stmt.run(k, String(v))
+      const setAll = db.transaction((d: Record<string, string>) => {
+        for (const [k, v] of Object.entries(d)) stmt.run(k, v)
       })
-      setAll(data)
+      setAll(converted)
       return { success: true }
     } catch (error) { return { success: false, error: String(error) } }
   })

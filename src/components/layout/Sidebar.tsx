@@ -104,9 +104,15 @@ export default function Sidebar() {
       {/* Navigation */}
       <nav style={{ flex: 1, padding: '8px 10px', overflowY: 'auto', overflowX: 'hidden' }}>
         {NAV_ITEMS.filter(item => {
-          if (!item.permission) return true
           if (!user) return false
-          if (user.role === 'admin') return true
+          
+          // Require explicitly 'admin' role for system settings
+          if (item.to === '/settings') {
+            return user.role?.toLowerCase() === 'admin'
+          }
+          
+          if (!item.permission) return true
+          if (user.role?.toLowerCase() === 'admin') return true
           
           let perms: string[] = []
           if (Array.isArray(user.permissions)) {

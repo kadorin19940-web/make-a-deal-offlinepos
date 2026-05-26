@@ -83,7 +83,7 @@ export default function SettingsPage() {
   }
 
   const handleSaveSettings = async () => {
-    if (api) await api.settings.setMultiple(local)
+    if (api) await api.settings.setMultiple(local, currentUser?.id)
     setSettings(local as Record<string, string>)
     setSaved(true)
     toast.success('บันทึกการตั้งค่าแล้ว')

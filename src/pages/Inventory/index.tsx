@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Warehouse, ArrowUp, ArrowDown, RefreshCw, AlertTriangle, Package } from 'lucide-react'
+import { Warehouse, ArrowUp, ArrowDown, RefreshCw, AlertTriangle, Package, Download, Loader } from 'lucide-react'
 import toast from 'react-hot-toast'
+import * as XLSX from 'xlsx'
 import type { Product } from '../../types'
 
 const api = (window as any).api
@@ -20,6 +21,69 @@ export default function InventoryPage() {
   const [adjustType, setAdjustType] = useState<'in' | 'out' | 'adjust'>('in')
   const [adjustQty, setAdjustQty] = useState('')
   const [adjustNote, setAdjustNote] = useState('')
+  const [exporting, setExporting] = useState(false)
+
+  // Batch Processing Excel Exporter for Inventory Stock
+  const handleExportExcel = async () => {
+    if (exporting) return
+    setExporting(true)
+    const toastId = toast.loading('กำลังจัดเตรียมข้อมูลคลังสินค้าเพื่อส่งออก...')
+
+    try {
+      const dataToExport = [...MOCK_PRODUCTS]
+      const chunkSize = 5 // process 5 records in a batch
+      const processedRows: Record<string, unknown>[] = []
+
+      // Batch processing yielding to event loop
+      for (let i = 0; i < dataToExport.length; i += chunkSize) {
+        await new Promise(resolve => setTimeout(resolve, 60)) // Yield to main thread
+        const chunk = dataToExport.slice(i, i + chunkSize).map(item => ({
+          'บาร์โค้ด': item.barcode || '—',
+          'SKU': item.sku || '—',
+          'ชื่อสินค้า': item.name,
+          'หมวดหมู่': item.category_name || '—',
+          'สต็อกคงเหลือ': item.stock_qty,
+          'หน่วย': item.unit,
+          'สต็อกขั้นต่ำ': item.min_stock,
+          'สต็อกสูงสุด': item.max_stock,
+          'ต้นทุน/หน่วย (บาท)': item.cost_price,
+          'มูลค่าต้นทุนรวม (บาท)': item.stock_qty * item.cost_price,
+          'ราคาขาย (บาท)': item.sell_price,
+        }))
+        processedRows.push(...chunk)
+      }
+
+      const ws = XLSX.utils.json_to_sheet(processedRows)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'คลังสินค้า')
+
+      if (api) {
+        const defaultName = `รายการคลังสินค้า_${new Date().toISOString().slice(0, 10)}.xlsx`
+        const saveRes = await api.dialog.saveFile(defaultName, [{ name: 'Excel Files', extensions: ['xlsx'] }])
+        
+        if (saveRes.filePath) {
+          const excelBase64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' })
+          const res = await api.fs.writeExcel(saveRes.filePath, excelBase64)
+          if (res.success) {
+            toast.success('ส่งออกรายการคลังสินค้าสำเร็จแล้ว!', { id: toastId })
+          } else {
+            throw new Error(res.error || 'เขียนไฟล์ล้มเหลว')
+          }
+        } else {
+          toast.dismiss(toastId)
+        }
+      } else {
+        // Fallback for browser
+        XLSX.writeFile(wb, `รายการคลังสินค้า_${new Date().toISOString().slice(0, 10)}.xlsx`)
+        toast.success('ส่งออกรายการคลังสินค้าสำเร็จแล้ว! (โหมดบราวเซอร์)', { id: toastId })
+      }
+    } catch (error) {
+      console.error(error)
+      toast.error(`ส่งออกคลังสินค้าล้มเหลว: ${String(error)}`, { id: toastId })
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const filtered = MOCK_PRODUCTS.filter(p => {
     if (p.is_service) return false
@@ -52,7 +116,24 @@ export default function InventoryPage() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, position: 'relative' }}>
+      {/* Loading Spinner Overlay during export */}
+      {exporting && (
+        <div style={{
+          position: 'absolute', inset: -10, background: 'rgba(10,10,15,0.7)',
+          zIndex: 100, borderRadius: 20, display: 'flex', alignItems: 'center',
+          justifyContent: 'center', backdropFilter: 'blur(4px)',
+          animation: 'fadeIn 0.2s ease-out'
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+            <div className="animate-spin text-green-500">
+              <Loader size={36} className="animate-spin" />
+            </div>
+            <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.8)', fontWeight: 600 }}>กำลังประมวลผลสต็อกสินค้า...</span>
+          </div>
+        </div>
+      )}
+
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
         {[
@@ -71,17 +152,27 @@ export default function InventoryPage() {
         ))}
       </div>
 
-      {/* Filter buttons */}
-      <div style={{ display: 'flex', gap: 8 }}>
-        {[['all', 'ทั้งหมด'], ['low', 'ใกล้หมด'], ['out', 'หมดสต็อก']].map(([v, l]) => (
-          <button key={v} onClick={() => setFilter(v as StockFilter)}
-            style={{
-              padding: '7px 16px', borderRadius: 100, fontSize: 13, fontWeight: 500, cursor: 'pointer', border: '1px solid transparent', fontFamily: 'inherit',
-              background: filter === v ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)',
-              color: filter === v ? '#22c55e' : 'rgba(255,255,255,0.5)',
-              borderColor: filter === v ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.08)',
-            }}>{l}</button>
-        ))}
+      {/* Filter buttons and Export */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {[['all', 'ทั้งหมด'], ['low', 'ใกล้หมด'], ['out', 'หมดสต็อก']].map(([v, l]) => (
+            <button key={v} onClick={() => setFilter(v as StockFilter)}
+              style={{
+                padding: '7px 16px', borderRadius: 100, fontSize: 13, fontWeight: 500, cursor: 'pointer', border: '1px solid transparent', fontFamily: 'inherit',
+                background: filter === v ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)',
+                color: filter === v ? '#22c55e' : 'rgba(255,255,255,0.5)',
+                borderColor: filter === v ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.08)',
+              }}>{l}</button>
+          ))}
+        </div>
+        <button 
+          onClick={handleExportExcel}
+          disabled={exporting}
+          className={`glass-btn ${exporting ? 'opacity-50 cursor-not-allowed' : 'btn-secondary'}`}
+          style={{ padding: '7px 16px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, borderRadius: 100 }}
+        >
+          <Download size={14} /> ส่งออก Excel
+        </button>
       </div>
 
       {/* Products table */}
