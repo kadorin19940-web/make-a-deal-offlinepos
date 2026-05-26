@@ -224,7 +224,7 @@ app.whenReady().then(() => {
   //    injecting a forged success payload to skip activation.
   ipcMain.handle('system:activate-license', async (_, { licenseKey, hardwareId }: { licenseKey: string; hardwareId: string }) => {
     try {
-      const GAS_URL = 'https://script.google.com/macros/s/1fd2TtGMpDkJuYiXELcsESHvJFqWRQPPBJIPzsdJJPEs/exec'
+      const GAS_URL = 'https://script.google.com/macros/s/AKfycbzJDGal71Cz4srjNHd5cPYKKOPQuzY84AZHZAAfhNY56r5VNTP-jsjsYWC3VtNu1g4l4g/exec'
 
       const response = await fetch(GAS_URL, {
         method: 'POST',
