@@ -18,7 +18,7 @@ import LockScreen from './components/layout/LockScreen'
 import ActivationScreen from './pages/Activation'
 
 export default function App() {
-  const { isAuthenticated, isLocked } = useAuthStore()
+  const { isAuthenticated, isLocked, user } = useAuthStore()
 
   // ── Activation Gate ────────────────────────────────────────────────────────
   // null  = still checking (show nothing to avoid flash)
@@ -86,7 +86,16 @@ export default function App() {
           <Route path="/reports/*" element={<ReportsPage />} />
           <Route path="/promotions/*" element={<PromotionsPage />} />
           <Route path="/sessions/*" element={<SessionsPage />} />
-          <Route path="/settings/*" element={<SettingsPage />} />
+          <Route
+            path="/settings/*"
+            element={
+              user?.role?.toLowerCase() === 'admin' ? (
+                <SettingsPage />
+              ) : (
+                <Navigate to="/dashboard" replace />
+              )
+            }
+          />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </Layout>

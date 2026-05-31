@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, ShoppingCart, Package, Warehouse,
   Users, Truck, BarChart2, Tag, DollarSign, Settings,
@@ -23,6 +23,7 @@ const NAV_ITEMS = [
 
 export default function Sidebar() {
   const location = useLocation()
+  const navigate = useNavigate()
   const { user, logout, lock } = useAuthStore()
   const { sidebarOpen, setSidebarOpen } = useUIStore()
   const { currentSession } = useSessionStore()
@@ -199,7 +200,11 @@ export default function Sidebar() {
             {sidebarOpen && 'ล็อก'}
           </button>
           <button
-            onClick={() => { logout(); toast('ออกจากระบบแล้ว') }}
+            onClick={() => {
+              navigate('/dashboard', { replace: true })
+              logout()
+              toast('ออกจากระบบแล้ว')
+            }}
             style={{
               flex: 1, padding: '8px', background: 'none',
               border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8,
