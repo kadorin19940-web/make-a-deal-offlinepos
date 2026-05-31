@@ -28,7 +28,6 @@
   "nsis": {
     "oneClick": true,
     "perMachine": false,
-    "allowToChangeInstallationDirectory": true,
     "createDesktopShortcut": "always",
     "createStartMenuShortcut": true,
     "shortcutName": "Make a Deal POS (Solo)",

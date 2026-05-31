@@ -36,7 +36,7 @@ jobs:
       - name: Configure Build Target - Solo Standard
         run: |
           New-Item -ItemType Directory -Force -Path public
-          echo '{"packageType": "solo"}' > public/build-config.json
+          node -e "require('fs').writeFileSync('public/build-config.json', JSON.stringify({ packageType: 'solo' }))"
 
       - name: Build production application (Solo)
         run: npm run build
@@ -71,7 +71,7 @@ jobs:
       # ========================================================================
       - name: Configure Build Target - LAN Multi-Station
         run: |
-          echo '{"packageType": "lan"}' > public/build-config.json
+          node -e "require('fs').writeFileSync('public/build-config.json', JSON.stringify({ packageType: 'lan' }))"
 
       - name: Build production application (LAN)
         run: npm run build
