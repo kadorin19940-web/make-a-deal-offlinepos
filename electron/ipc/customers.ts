@@ -887,4 +887,46 @@ export function registerBackupHandlers(db: Database.Database) {
   ipcMain.handle('backup:setAutoBackup', () => {
     return { success: true }
   })
+
+  ipcMain.handle('backup:export-custom', async (_, targetDir: string) => {
+    try {
+      if (!targetDir) {
+        return { success: false, error: 'โฟลเดอร์ปลายทางไม่ถูกต้อง' }
+      }
+
+      // Generate a dynamic clean folder name based on app.name
+      const rawAppName = app.name || 'MakeADeal'
+      const cleanAppName = rawAppName.replace(/[^a-zA-Z0-9_-]/g, '_')
+      
+      const now = new Date()
+      const year = now.getFullYear()
+      const month = String(now.getMonth() + 1).padStart(2, '0')
+      const day = String(now.getDate()).padStart(2, '0')
+      const hour = String(now.getHours()).padStart(2, '0')
+      const minute = String(now.getMinutes()).padStart(2, '0')
+      const second = String(now.getSeconds()).padStart(2, '0')
+      const timestamp = `${year}-${month}-${day}_${hour}-${minute}-${second}`
+      
+      const exportDirName = `${cleanAppName}_Manual_Backup_${timestamp}`
+      const fullExportPath = path.join(targetDir, exportDirName)
+      
+      // Guarantee Destination Directory exists
+      fs.mkdirSync(fullExportPath, { recursive: true })
+      
+      // 1. Atomic Database copy using better-sqlite3 .backup API for active database safety
+      const destDbPath = path.join(fullExportPath, 'make-a-deal-pos.db')
+      await db.backup(destDbPath)
+      
+      // 2. Recursive Images copy using Node.js fs.cpSync
+      const srcImagesDir = path.join(app.getPath('userData'), 'images')
+      if (fs.existsSync(srcImagesDir)) {
+        const destImagesDir = path.join(fullExportPath, 'images')
+        fs.cpSync(srcImagesDir, destImagesDir, { recursive: true })
+      }
+      
+      return { success: true, data: { path: fullExportPath } }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
 }

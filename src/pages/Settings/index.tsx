@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Store, Percent, Printer, Shield, Users, Database, Globe,
   Save, Check as CheckIcon, ChevronRight, Plus, Edit2, Trash2, X,
@@ -18,6 +19,7 @@ const TABS = [
   { id: 'security', label: 'ความปลอดภัย',    icon: <Shield size={16} /> },
   { id: 'backup',   label: 'สำรองข้อมูล',    icon: <Database size={16} /> },
   { id: 'language', label: 'ภาษา/ทั่วไป',    icon: <Globe size={16} /> },
+  { id: 'license',  label: 'สิทธิ์การใช้งาน', icon: <Shield size={16} /> },
 ]
 
 const MOCK_USERS: UserType[] = [
@@ -59,6 +61,7 @@ const EMPTY_FORM: UserForm = {
 }
 
 export default function SettingsPage() {
+  const navigate = useNavigate()
   const [activeTab, setActiveTab]       = useState('shop')
   const [saved, setSaved]               = useState(false)
   const { settings, setSettings }       = useSettingsStore()
@@ -72,9 +75,29 @@ export default function SettingsPage() {
   const [showConfirmPw, setShowConfirmPw] = useState(false)
   const [loading, setLoading]           = useState(false)
 
+  // License State and loader
+  const [licenseInfo, setLicenseInfo] = useState<{
+    is_activated: number
+    license_key: string | null
+    email: string | null
+    activated_at: string | null
+  } | null>(null)
+  const [showDeactivateModal, setShowDeactivateModal] = useState(false)
+  const [deactivating, setDeactivating] = useState(false)
+  const [customExporting, setCustomExporting] = useState(false)
+
+  const loadLicenseInfo = async () => {
+    if ((window as any).api && (window as any).api.system) {
+      const res = await (window as any).api.system.checkActivation()
+      if (res.success && res.data) {
+        setLicenseInfo(res.data)
+      }
+    }
+  }
+
   // Load settings + users on mount
   useEffect(() => { setLocal({ ...settings }) }, [settings])
-  useEffect(() => { loadUsers() }, [])
+  useEffect(() => { loadUsers(); loadLicenseInfo() }, [])
 
   const loadUsers = async () => {
     if (!api) return
@@ -88,6 +111,41 @@ export default function SettingsPage() {
     setSaved(true)
     toast.success('บันทึกการตั้งค่าแล้ว')
     setTimeout(() => setSaved(false), 2500)
+  }
+
+  const handleCustomExport = async () => {
+    if (!api || !api.dialog || !api.backup) {
+      toast.error('ไม่สามารถเรียกใช้งาน API ของระบบได้')
+      return
+    }
+
+    try {
+      const folderRes = await api.dialog.openDirectory()
+      if (folderRes.canceled || !folderRes.filePaths || folderRes.filePaths.length === 0) {
+        return
+      }
+
+      const selectedDir = folderRes.filePaths[0]
+      setCustomExporting(true)
+      
+      const loadToastId = toast.loading('กำลังรวบรวมไฟล์และสำรองข้อมูล...')
+      
+      const res = await api.backup.exportCustom(selectedDir)
+      
+      toast.dismiss(loadToastId)
+      
+      if (res.success) {
+        toast.success(`สำรองข้อมูลเรียบร้อย! คัดลอกฐานข้อมูลและรูปภาพสินค้าสำเร็จ`, {
+          duration: 6000
+        })
+      } else {
+        toast.error(`การสำรองข้อมูลล้มเหลว: ${res.error || 'เกิดข้อผิดพลาดไม่ทราบสาเหตุ'}`)
+      }
+    } catch (err) {
+      toast.error(`ข้อผิดพลาดการเชื่อมต่อระบบ: ${String(err)}`)
+    } finally {
+      setCustomExporting(false)
+    }
   }
 
   const setField = (k: string, v: string) => setLocal(f => ({ ...f, [k]: v }))
@@ -244,9 +302,34 @@ export default function SettingsPage() {
           {/* ---- Shop Info ---- */}
           {activeTab === 'shop' && (
             <Section title="ข้อมูลร้านค้า" desc="ชื่อร้าน ที่อยู่ และข้อมูลติดต่อ">
-              {([['shop_name','ชื่อร้าน (ภาษาไทย)'],['shop_name_en','ชื่อร้าน (English)'],['shop_address','ที่อยู่'],['shop_phone','เบอร์โทรศัพท์'],['shop_email','อีเมล'],['shop_tax_id','เลขผู้เสียภาษี']] as [string,string][]).map(([k,l]) => (
+              {([
+                ['shop_name', 'ชื่อร้าน (ภาษาไทย)', 'ชื่อภาษาไทยของร้านค้า จะแสดงผลบนหน้าจอโปรแกรมหลักและหน้าต่างรายงานต่างๆ'],
+                ['shop_name_en', 'ชื่อร้าน (English)', 'ชื่อภาษาอังกฤษของร้านค้า ใช้สำหรับแสดงผลบนรูปแบบเอกสารหรือรายงานที่เป็นภาษาอังกฤษ'],
+                ['shop_address', 'ที่อยู่', 'ที่อยู่ร้านค้าแบบละเอียด จะใช้แสดงในส่วนหัวหรือท้ายของใบเสร็จรับเงินที่พิมพ์ให้ลูกค้า'],
+                ['shop_phone', 'เบอร์โทรศัพท์', 'เบอร์โทรศัพท์ติดต่อของร้านค้า จะแสดงในใบเสร็จเพื่อให้ลูกค้าสามารถติดต่อกลับได้สะดวก'],
+                ['shop_email', 'อีเมล', 'อีเมลติดต่อของร้านค้า สำหรับติดต่อประสานงานและแสดงผลบนใบเสร็จรับเงิน'],
+                ['shop_tax_id', 'เลขผู้เสียภาษี', 'เลขประจำตัวผู้เสียภาษีอากร 13 หลักของร้านค้า จำเป็นอย่างยิ่งในการออกใบกำกับภาษีอย่างย่อ'],
+                ['promptpay_id', 'เบอร์พร้อมเพย์ / เลขผู้เสียภาษี (สำหรับสร้าง QR Code)', 'เบอร์พร้อมเพย์ หรือเลขผู้เสียภาษี สำหรับสร้าง QR Code ให้ลูกค้าสแกนจ่ายเงินได้สะดวกรวดเร็ว']
+              ] as [string,string,string][]).map(([k,l,h]) => (
                 <SettingRow key={k} label={l}>
                   <input className="glass-input" value={local[k] || ''} onChange={e => setField(k, e.target.value)} placeholder={l} />
+                  <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4, lineHeight: 1.4 }}>
+                    {h}
+                  </p>
+                  {k === 'promptpay_id' && (
+                    <p style={{
+                      fontSize: 12,
+                      color: '#fcd34d',
+                      marginTop: 6,
+                      opacity: 0.85,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      lineHeight: 1.4
+                    }}>
+                      💡 ข้อมูลนี้จะถูกนำไปใช้สร้าง QR Code พร้อมเพย์อัตโนมัติ เพื่อแสดงบนหน้าจอชำระเงินเมื่อลูกค้าต้องการโอนจ่าย
+                    </p>
+                  )}
                 </SettingRow>
               ))}
             </Section>
@@ -255,18 +338,36 @@ export default function SettingsPage() {
           {/* ---- Tax ---- */}
           {activeTab === 'tax' && (
             <Section title="ภาษีและราคา" desc="VAT และระบบแต้มสะสม">
-              <SettingRow label="เปิดใช้ VAT"><Toggle checked={local.vat_enabled === 'true'} onChange={v => setField('vat_enabled', v ? 'true' : 'false')} /></SettingRow>
-              <SettingRow label="อัตรา VAT (%)"><input className="glass-input" type="number" value={local.vat_rate || '7'} onChange={e => setField('vat_rate', e.target.value)} style={{ maxWidth: 120 }} /></SettingRow>
-              <SettingRow label="VAT รวมในราคา"><Toggle checked={local.vat_inclusive !== 'false'} onChange={v => setField('vat_inclusive', v ? 'true' : 'false')} /></SettingRow>
-              <SettingRow label="สะสมแต้ม (บาท / 1 แต้ม)"><input className="glass-input" type="number" value={local.points_per_baht || '1'} onChange={e => setField('points_per_baht', e.target.value)} style={{ maxWidth: 120 }} /></SettingRow>
-              <SettingRow label="แลกแต้ม (1 แต้ม = กี่บาท)"><input className="glass-input" type="number" value={local.baht_per_point || '0.1'} onChange={e => setField('baht_per_point', e.target.value)} style={{ maxWidth: 120 }} /></SettingRow>
+              <SettingRow label="เปิดใช้ VAT">
+                <Toggle checked={local.vat_enabled === 'true'} onChange={v => setField('vat_enabled', v ? 'true' : 'false')} />
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>เปิดหรือปิดการคำนวณภาษีมูลค่าเพิ่มสำหรับรายการสินค้าขายทั้งหมดในหน้าร้าน</p>
+              </SettingRow>
+              <SettingRow label="อัตรา VAT (%)">
+                <input className="glass-input" type="number" value={local.vat_rate || '7'} onChange={e => setField('vat_rate', e.target.value)} style={{ maxWidth: 120 }} />
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>สัดส่วนเปอร์เซ็นต์ภาษีมูลค่าเพิ่ม (ปกติคือ 7% สำหรับประเทศไทย)</p>
+              </SettingRow>
+              <SettingRow label="VAT รวมในราคา">
+                <Toggle checked={local.vat_inclusive !== 'false'} onChange={v => setField('vat_inclusive', v ? 'true' : 'false')} />
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>เปิดเพื่อให้ราคาขายสินค้ารวมภาษีไว้แล้ว (Inclusive VAT) หรือปิดเพื่อบวกภาษีเพิ่มต่างหาก (Exclusive VAT)</p>
+              </SettingRow>
+              <SettingRow label="สะสมแต้ม (บาท / 1 แต้ม)">
+                <input className="glass-input" type="number" value={local.points_per_baht || '1'} onChange={e => setField('points_per_baht', e.target.value)} style={{ maxWidth: 120 }} />
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>จำนวนเงินยอดซื้อสินค้าต่อการรับคะแนนสะสม 1 คะแนน (เช่น ยอด 1 บาท ได้ 1 คะแนน)</p>
+              </SettingRow>
+              <SettingRow label="แลกแต้ม (1 แต้ม = กี่บาท)">
+                <input className="glass-input" type="number" value={local.baht_per_point || '0.1'} onChange={e => setField('baht_per_point', e.target.value)} style={{ maxWidth: 120 }} />
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>มูลค่าเงินคืนหรือส่วนลดที่ลูกค้าได้รับเมื่อนำคะแนนสะสม 1 คะแนนมาแลกรับส่วนลด</p>
+              </SettingRow>
             </Section>
           )}
 
           {/* ---- Receipt ---- */}
           {activeTab === 'receipt' && (
             <Section title="ใบเสร็จ และเครื่องพิมพ์" desc="ตั้งค่าการพิมพ์ใบเสร็จ">
-              <SettingRow label="พิมพ์ใบเสร็จอัตโนมัติ"><Toggle checked={local.auto_print === 'true'} onChange={v => setField('auto_print', v ? 'true' : 'false')} /></SettingRow>
+              <SettingRow label="พิมพ์ใบเสร็จอัตโนมัติ">
+                <Toggle checked={local.auto_print === 'true'} onChange={v => setField('auto_print', v ? 'true' : 'false')} />
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>เมื่อเปิดใช้งาน เครื่องพิมพ์จะพิมพ์ใบเสร็จโดยอัตโนมัติทันทีที่ชำระเงินเสร็จสิ้น</p>
+              </SettingRow>
               <SettingRow label="ขนาดกระดาษ">
                 <select className="glass-input" value={local.printer_size || '80mm'} onChange={e => setField('printer_size', e.target.value)} style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.8)', maxWidth: 160 }}>
                   <option value="58mm">58mm (Thermal)</option>
@@ -274,9 +375,16 @@ export default function SettingsPage() {
                   <option value="A4">A4</option>
                   <option value="A5">A5</option>
                 </select>
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>ขนาดของม้วนกระดาษของเครื่องพิมพ์ใบเสร็จความร้อน หรือแบบรายงานปกติที่ใช้งาน</p>
               </SettingRow>
-              <SettingRow label="ข้อความส่วนหัวใบเสร็จ"><input className="glass-input" value={local.receipt_header || ''} onChange={e => setField('receipt_header', e.target.value)} placeholder="ขอบคุณที่ใช้บริการ" /></SettingRow>
-              <SettingRow label="ข้อความส่วนท้ายใบเสร็จ"><input className="glass-input" value={local.receipt_footer || ''} onChange={e => setField('receipt_footer', e.target.value)} placeholder="กรุณาเก็บใบเสร็จไว้" /></SettingRow>
+              <SettingRow label="ข้อความส่วนหัวใบเสร็จ">
+                <input className="glass-input" value={local.receipt_header || ''} onChange={e => setField('receipt_header', e.target.value)} placeholder="ขอบคุณที่ใช้บริการ" />
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>ข้อความต้อนรับหรือรายละเอียดเพิ่มเติมที่ต้องการพิมพ์แสดงไว้ส่วนหัวของใบเสร็จ</p>
+              </SettingRow>
+              <SettingRow label="ข้อความส่วนท้ายใบเสร็จ">
+                <input className="glass-input" value={local.receipt_footer || ''} onChange={e => setField('receipt_footer', e.target.value)} placeholder="กรุณาเก็บใบเสร็จไว้" />
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>ข้อความขอบคุณหรือเงื่อนไขการรับเปลี่ยนคืนสินค้าที่จะพิมพ์ไว้ด้านล่างสุดของใบเสร็จ</p>
+              </SettingRow>
             </Section>
           )}
 
@@ -378,6 +486,7 @@ export default function SettingsPage() {
             <Section title="ความปลอดภัย" desc="PIN และการล็อกหน้าจออัตโนมัติ">
               <SettingRow label="ล็อกหน้าจออัตโนมัติ (นาที)">
                 <input className="glass-input" type="number" value={local.pin_lock_minutes || '15'} onChange={e => setField('pin_lock_minutes', e.target.value)} style={{ maxWidth: 120 }} />
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>เมื่อไม่มีการขยับหน้าจอในระยะเวลาที่กำหนด ระบบจะล็อกหน้าจอขายอัตโนมัติเพื่อความปลอดภัยและต้องใช้ PIN เพื่อปลดล็อก</p>
               </SettingRow>
             </Section>
           )}
@@ -385,9 +494,15 @@ export default function SettingsPage() {
           {/* ---- Backup ---- */}
           {activeTab === 'backup' && (
             <Section title="สำรองข้อมูล" desc="สำรองและกู้คืนฐานข้อมูล SQLite">
-              <SettingRow label="สำรองข้อมูลอัตโนมัติ"><Toggle checked={local.backup_enabled === 'true'} onChange={v => setField('backup_enabled', v ? 'true' : 'false')} /></SettingRow>
-              <SettingRow label="ทุกกี่ชั่วโมง"><input className="glass-input" type="number" value={local.backup_interval_hours || '24'} onChange={e => setField('backup_interval_hours', e.target.value)} style={{ maxWidth: 120 }} /></SettingRow>
-              <SettingRow label="">
+              <SettingRow label="สำรองข้อมูลอัตโนมัติ font-medium">
+                <Toggle checked={local.backup_enabled === 'true'} onChange={v => setField('backup_enabled', v ? 'true' : 'false')} />
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>เปิดหรือปิดระบบสำรองฐานข้อมูลอัตโนมัติเพื่อความปลอดภัยสูง ป้องกันไฟล์พังกรณีระบบปฏิบัติการค้างหรือไฟตก</p>
+              </SettingRow>
+              <SettingRow label="ทุกกี่ชั่วโมง">
+                <input className="glass-input" type="number" value={local.backup_interval_hours || '24'} onChange={e => setField('backup_interval_hours', e.target.value)} style={{ maxWidth: 120 }} />
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>ความถี่ในการรันสำรองข้อมูลเบื้องหลังอัตโนมัติในทุกๆ ชั่วโมงขณะโปรแกรมกำลังเปิดรันอยู่</p>
+              </SettingRow>
+              <SettingRow label="ดำเนินการด่วน">
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button onClick={async () => { if (api) { const r = await api.backup.create(); if (r.success) toast.success('สำรองข้อมูลแล้ว') } else toast.success('Demo: สำรองข้อมูลแล้ว') }} className="glass-btn btn-primary" style={{ fontSize: 13 }}>
                     <Database size={14} /> สำรองข้อมูลเดี๋ยวนี้
@@ -395,6 +510,64 @@ export default function SettingsPage() {
                   <button onClick={() => toast('กรุณาเลือกไฟล์สำรอง')} className="glass-btn btn-secondary" style={{ fontSize: 13 }}>
                     กู้คืนข้อมูล
                   </button>
+                </div>
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 8 }}>สั่งรันระบบสำรองฐานข้อมูลแบบเงียบ หรือเลือกกู้คืนไฟล์ระบบผ่านการเลือกไฟล์ต้นฉบับสำรอง</p>
+              </SettingRow>
+
+              <SettingRow label="ส่งออกข้อมูลทั้งหมดแบบกำหนดเอง">
+                <div style={{
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  borderRadius: 14,
+                  padding: '20px 24px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
+                  marginTop: 10,
+                }}>
+                  <div style={{ fontSize: 13, color: '#60a5fa', fontWeight: 600, lineHeight: 1.4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Database size={15} /> สำรองข้อมูลและรูปภาพลงไดรฟ์ภายนอก (USB / Flash Drive)
+                  </div>
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', lineHeight: 1.5 }}>
+                    สำหรับผู้ที่ต้องการสำรองข้อมูลด่วนหรือต้องการย้ายเครื่องคอมพิวเตอร์ ระบบจะทำการคัดลอกไฟล์ฐานข้อมูลหลัก (.db) ควบคู่กับแฟ้มรูปภาพสินค้าทั้งหมดในระบบ ไปรวมเก็บไว้ในโฟลเดอร์ปลายทางที่คุณระบุได้ทันทีในคลิกเดียว
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 4 }}>
+                    <button
+                      onClick={handleCustomExport}
+                      disabled={customExporting}
+                      className="glass-btn"
+                      style={{
+                        background: customExporting ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg, rgba(59,130,246,0.2), rgba(37,99,235,0.2))',
+                        border: '1px solid rgba(59,130,246,0.35)',
+                        borderRadius: 10,
+                        padding: '10px 18px',
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: customExporting ? 'rgba(255,255,255,0.3)' : '#60a5fa',
+                        cursor: customExporting ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        transition: 'all 0.2s',
+                        opacity: customExporting ? 0.6 : 1
+                      }}
+                      onMouseEnter={e => {
+                        if (!customExporting) {
+                          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(59,130,246,0.3), rgba(37,99,235,0.3))'
+                          e.currentTarget.style.borderColor = 'rgba(59,130,246,0.5)'
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (!customExporting) {
+                          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(59,130,246,0.2), rgba(37,99,235,0.2))'
+                          e.currentTarget.style.borderColor = 'rgba(59,130,246,0.35)'
+                        }
+                      }}
+                    >
+                      <Database size={14} />
+                      {customExporting ? 'กำลังส่งออกข้อมูล...' : 'เลือกโฟลเดอร์ปลายทาง และสำรองข้อมูล'}
+                    </button>
+                  </div>
                 </div>
               </SettingRow>
             </Section>
@@ -408,6 +581,7 @@ export default function SettingsPage() {
                   <option value="th">ภาษาไทย</option>
                   <option value="en">English</option>
                 </select>
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>ภาษาหลักที่จะใช้สำหรับแสดงผลเมนู ข้อมูลนำทาง และสเตตัสต่างๆ ของแอปพลิเคชัน</p>
               </SettingRow>
               <SettingRow label="รูปแบบวันที่">
                 <select className="glass-input" value={local.date_format || 'dd/MM/yyyy'} onChange={e => setField('date_format', e.target.value)} style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.8)', maxWidth: 200 }}>
@@ -415,14 +589,115 @@ export default function SettingsPage() {
                   <option value="MM/dd/yyyy">MM/DD/YYYY</option>
                   <option value="yyyy-MM-dd">YYYY-MM-DD</option>
                 </select>
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>การจัดเรียงรูปแบบวัน/เดือน/ปีสำหรับการแสดงผลในหน้าร้านและการออกเอกสาร</p>
               </SettingRow>
-              <SettingRow label="แจ้งเตือนสินค้าใกล้หมด"><Toggle checked={local.low_stock_alert !== 'false'} onChange={v => setField('low_stock_alert', v ? 'true' : 'false')} /></SettingRow>
+              <SettingRow label="แจ้งเตือนสินค้าใกล้หมด">
+                <Toggle checked={local.low_stock_alert !== 'false'} onChange={v => setField('low_stock_alert', v ? 'true' : 'false')} />
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>เมื่อเปิดใช้งาน จะปรากฏแถบเตือนสีแดงในหน้ารายการสินค้าหากมีสต็อกต่ำกว่าจุดวิกฤตที่ได้กำหนดไว้</p>
+              </SettingRow>
+            </Section>
+          )}
+
+          {/* ---- License ---- */}
+          {activeTab === 'license' && (
+            <Section title="การจัดการลิขสิทธิ์" desc="ข้อมูลใบอนุญาตและการโอนย้ายเครื่อง">
+              <div style={{
+                background: 'rgba(255,255,255,0.02)',
+                border: '1px solid rgba(255,255,255,0.06)',
+                borderRadius: 14,
+                padding: '20px 24px',
+                marginBottom: 20
+              }}>
+                <SettingRow label="สถานะการเปิดใช้งาน">
+                  <span style={{
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: licenseInfo?.is_activated ? '#22c55e' : '#ef4444',
+                    background: licenseInfo?.is_activated ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+                    padding: '3px 10px',
+                    borderRadius: 100,
+                    border: `1px solid ${licenseInfo?.is_activated ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`
+                  }}>
+                    {licenseInfo?.is_activated ? 'เปิดใช้งานแล้ว (Activated)' : 'ยังไม่ได้เปิดใช้งาน (Unactivated)'}
+                  </span>
+                </SettingRow>
+
+                {licenseInfo?.is_activated ? (
+                  <>
+                    <SettingRow label="คีย์ลิขสิทธิ์ (License Key)">
+                      <span style={{ fontSize: 13, fontFamily: 'monospace', color: 'rgba(255,255,255,0.85)', letterSpacing: '0.05em' }}>
+                        {licenseInfo.license_key ? `${licenseInfo.license_key.slice(0, 8)}-XXXX-XXXX-${licenseInfo.license_key.slice(-8)}` : '-'}
+                      </span>
+                    </SettingRow>
+                    <SettingRow label="อีเมลผู้ลงทะเบียน">
+                      <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.85)' }}>
+                        {licenseInfo.email || '-'}
+                      </span>
+                    </SettingRow>
+                    <SettingRow label="วันที่เปิดใช้งาน">
+                      <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)' }}>
+                        {licenseInfo.activated_at ? new Date(licenseInfo.activated_at).toLocaleString('th-TH') : '-'}
+                      </span>
+                    </SettingRow>
+                  </>
+                ) : null}
+              </div>
+
+              {licenseInfo?.is_activated ? (
+                <div style={{
+                  background: 'rgba(239,68,68,0.04)',
+                  border: '1px solid rgba(239,68,68,0.15)',
+                  borderRadius: 14,
+                  padding: '20px 24px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12
+                }}>
+                  <div style={{ fontSize: 13, color: '#fca5a5', fontWeight: 600, lineHeight: 1.4 }}>
+                    ⚠️ คำเตือนการย้ายสิทธิ์เครื่องคอมพิวเตอร์
+                  </div>
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', lineHeight: 1.5 }}>
+                    หากคุณต้องการเปลี่ยนเครื่องคอมพิวเตอร์ หรือล้างระบบวินโดว์ใหม่ กรุณากดปุ่ม <strong>"ถอนสิทธิ์ลิขสิทธิ์"</strong> ด้านล่างนี้เพื่อปล่อยคีย์ชุดเดิมให้ว่างลง ระบบคลาวด์จะลบการเชื่อมต่อคีย์กับเครื่องนี้อัติโนมัติ ทำให้สามารถนำคีย์เดิมไปใช้ลงทะเบียนที่เครื่องใหม่ได้ทันที
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 4 }}>
+                    <button
+                      onClick={() => setShowDeactivateModal(true)}
+                      className="glass-btn"
+                      style={{
+                        background: 'rgba(239,68,68,0.15)',
+                        border: '1px solid rgba(239,68,68,0.3)',
+                        borderRadius: 8,
+                        padding: '10px 18px',
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: '#fca5a5',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s'
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.background = 'rgba(239,68,68,0.25)'
+                        e.currentTarget.style.color = '#ef4444'
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.background = 'rgba(239,68,68,0.15)'
+                        e.currentTarget.style.color = '#fca5a5'
+                      }}
+                    >
+                      ถอนการติดตั้งลิขสิทธิ์ย้ายเครื่อง (Deactivate)
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', textAlign: 'center', padding: '40px 0' }}>
+                  กรุณาเปิดใช้งานระบบผ่านหน้าระยะเริ่มต้นเพื่อเปิดสิทธิ์การใช้งาน
+                </div>
+              )}
             </Section>
           )}
         </div>
 
-        {/* Save button (not for users tab) */}
-        {activeTab !== 'users' && (
+        {/* Save button (not for users and license tabs) */}
+        {activeTab !== 'users' && activeTab !== 'license' && (
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button onClick={handleSaveSettings} className="glass-btn btn-primary" style={{ padding: '10px 24px', fontSize: 14, fontWeight: 700 }}>
               {saved ? <><CheckIcon size={15} /> บันทึกแล้ว</> : <><Save size={15} /> บันทึกการตั้งค่า</>}
@@ -596,6 +871,99 @@ export default function SettingsPage() {
               <button onClick={() => setShowUserModal(false)} className="glass-btn btn-secondary" style={{ fontSize: 13 }}>ยกเลิก</button>
               <button onClick={saveUser} disabled={loading} className="glass-btn btn-primary" style={{ fontSize: 13, fontWeight: 700, minWidth: 100 }}>
                 {loading ? 'กำลังบันทึก...' : editingUser ? 'บันทึกการเปลี่ยนแปลง' : 'เพิ่มผู้ใช้'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== License Deactivation Warning Modal ===================== */}
+      {showDeactivateModal && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && !deactivating && setShowDeactivateModal(false)}>
+          <div className="modal-content" style={{ width: 440, padding: 0, overflow: 'hidden', border: '1px solid rgba(239,68,68,0.2)' }}>
+            
+            {/* Header */}
+            <div style={{ padding: '18px 22px', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(239,68,68,0.05)' }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#fca5a5' }}>
+                  ⚠️ ยืนยันการถอนลิขสิทธิ์ย้ายเครื่อง
+                </div>
+              </div>
+              <button 
+                onClick={() => !deactivating && setShowDeactivateModal(false)} 
+                disabled={deactivating}
+                style={{ background: 'none', border: 'none', cursor: deactivating ? 'not-allowed' : 'pointer', color: 'rgba(255,255,255,0.4)', padding: 4 }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', lineHeight: 1.6, margin: 0 }}>
+                คุณกำลังจะทำการ <strong>ถอนการเชื่อมโยงสิทธิ์การใช้งาน (Deactivate License)</strong> ของเครื่องคอมพิวเตอร์เครื่องนี้ออกจากฐานข้อมูลคลาวด์
+              </p>
+              <div style={{
+                background: 'rgba(239,68,68,0.08)',
+                border: '1px solid rgba(239,68,68,0.2)',
+                borderRadius: 10,
+                padding: '12px 14px',
+                fontSize: 12,
+                color: '#fca5a5',
+                lineHeight: 1.5
+              }}>
+                <strong>ข้อควรระวัง:</strong><br />
+                • 🌐 <strong>ต้องเชื่อมต่ออินเทอร์เน็ต:</strong> เครื่องคอมพิวเตอร์ของคุณต้องเชื่อมต่อเน็ตเพื่อส่งคำขอถอนสิทธิ์ไปยังคลาวด์หลังบ้าน<br />
+                • หลังถอนสิทธิ์สำเร็จ แอปพลิเคชันในเครื่องนี้จะถูกล็อกทันทีและกลับสู่หน้าลงทะเบียน<br />
+                • โควตาการย้ายเครื่องจำกัดสูงสุดไม่เกิน <strong>3 ครั้งต่อปี</strong> เท่านั้น
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '0 22px 20px', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button 
+                onClick={() => setShowDeactivateModal(false)} 
+                disabled={deactivating}
+                className="glass-btn btn-secondary" 
+                style={{ fontSize: 13, cursor: deactivating ? 'not-allowed' : 'pointer' }}
+              >
+                ยกเลิก
+              </button>
+              <button 
+                onClick={async () => {
+                  setDeactivating(true)
+                  try {
+                    const res = await (window as any).api.system.deactivateLicense()
+                    if (res.success) {
+                      toast.success('ถอนการติดตั้งสิทธิ์ลิขสิทธิ์สำเร็จ! กำลังรีเซ็ตระบบ...')
+                      setTimeout(() => {
+                        navigate('/activation')
+                      }, 2000)
+                    } else {
+                      toast.error(res.error || 'เกิดข้อผิดพลาดในการยกเลิกลิขสิทธิ์')
+                    }
+                  } catch (err) {
+                    toast.error(`ข้อผิดพลาดการเชื่อมต่อ: ${String(err)}`)
+                  } finally {
+                    setDeactivating(false)
+                    setShowDeactivateModal(false)
+                  }
+                }}
+                disabled={deactivating} 
+                className="glass-btn" 
+                style={{ 
+                  background: 'linear-gradient(135deg, #ef4444, #b91c1c)',
+                  border: 'none',
+                  borderRadius: 10,
+                  padding: '10px 18px',
+                  fontSize: 13, 
+                  fontWeight: 700, 
+                  color: '#fff',
+                  cursor: deactivating ? 'not-allowed' : 'pointer',
+                  opacity: deactivating ? 0.6 : 1
+                }}
+              >
+                {deactivating ? 'กำลังยกเลิกสิทธิ์...' : 'ยืนยันถอนลิขสิทธิ์'}
               </button>
             </div>
           </div>

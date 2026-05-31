@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } from 'electron'
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
 import { machineIdSync } from 'node-machine-id'
 import { initDatabase } from './database'
 import { registerProductHandlers } from './ipc/products'
@@ -65,6 +66,55 @@ function createWindow() {
 app.whenReady().then(() => {
   // Initialize database
   const db = initDatabase()
+
+  // Permanent Silent Backup implementation
+  const runSilentBackup = () => {
+    try {
+      const homedir = os.homedir()
+      const backupDir = path.join(homedir, 'Documents', 'MakeADeal_Backups')
+      
+      // Directory Guarantee: Ensure folder exists recursively
+      fs.mkdirSync(backupDir, { recursive: true })
+      
+      const now = new Date()
+      const year = now.getFullYear()
+      const month = String(now.getMonth() + 1).padStart(2, '0')
+      const day = String(now.getDate()).padStart(2, '0')
+      const hour = String(now.getHours()).padStart(2, '0')
+      const minute = String(now.getMinutes()).padStart(2, '0')
+      const second = String(now.getSeconds()).padStart(2, '0')
+      
+      const timestamp = `${year}-${month}-${day}_${hour}-${minute}-${second}`
+      const backupPath = path.join(backupDir, `backup_${timestamp}.db`)
+      
+      // better-sqlite3 backup API
+      db.backup(backupPath)
+        .then(() => {
+          console.log('[Silent Backup] Success:', backupPath)
+        })
+        .catch((err) => {
+          console.error('[Silent Backup] Backup failed:', err)
+        })
+    } catch (error) {
+      console.error('[Silent Backup] Directory creation or backup error:', error)
+    }
+  }
+
+  // Trigger 1: Silent Backup on App Startup (with small delay to prevent DB boot locks)
+  setTimeout(runSilentBackup, 2000)
+
+  // Trigger 3: Silent Backup Background Interval (every 1 hour)
+  setInterval(runSilentBackup, 60 * 60 * 1000)
+
+  // Register silent backup IPC trigger (used for Trigger 2: Shift Close)
+  ipcMain.handle('backup:silent-trigger', async () => {
+    try {
+      runSilentBackup()
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
 
   // Register all IPC handlers
   registerProductHandlers(db)
@@ -210,9 +260,17 @@ app.whenReady().then(() => {
   // 2. Boot-time check — read is_activated directly from SQLite (tamper-proof)
   ipcMain.handle('system:check-activation', () => {
     try {
-      const row = db.prepare('SELECT is_activated, license_key FROM activation WHERE id = 1').get() as
-        { is_activated: number; license_key: string | null } | undefined
-      return { success: true, data: { is_activated: row?.is_activated ?? 0 } }
+      const row = db.prepare('SELECT is_activated, license_key, email, activated_at FROM activation WHERE id = 1').get() as
+        { is_activated: number; license_key: string | null; email: string | null; activated_at: string | null } | undefined
+      return {
+        success: true,
+        data: {
+          is_activated: row?.is_activated ?? 0,
+          license_key: row?.license_key || null,
+          email: row?.email || null,
+          activated_at: row?.activated_at || null
+        }
+      }
     } catch (error) {
       return { success: false, error: String(error) }
     }
@@ -264,6 +322,58 @@ app.whenReady().then(() => {
       return { success: true }
     } catch (error) {
       return { success: false, error: `Network error: ${String(error)}` }
+    }
+  })
+
+  // 4. Deactivate — CORS Bypass to GAS, then atomically clear SQLite activation
+  //    This prevents CORS errors on the frontend and ensures state integrity.
+  ipcMain.handle('system:deactivate-license', async () => {
+    try {
+      // Fetch active license from database
+      const row = db.prepare('SELECT license_key, hardware_id FROM activation WHERE id = 1').get() as
+        { license_key: string | null; hardware_id: string | null } | undefined
+
+      if (!row || !row.license_key || !row.hardware_id) {
+        return { success: false, error: 'ไม่พบข้อมูลสิทธิ์การใช้งานที่เปิดใช้งานอยู่ในเครื่องนี้' }
+      }
+
+      const GAS_URL = 'https://script.google.com/macros/s/AKfycbzJDGal71Cz4srjNHd5cPYKKOPQuzY84AZHZAAfhNY56r5VNTP-jsjsYWC3VtNu1g4l4g/exec'
+
+      const response = await fetch(GAS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'deactivate',
+          key: row.license_key,
+          hardware_id: row.hardware_id,
+        }),
+        redirect: 'follow',
+      })
+
+      if (!response.ok) {
+        return { success: false, error: `เซิร์ฟเวอร์ตอบรับด้วยสถานะ HTTP ${response.status}` }
+      }
+
+      const result = await response.json() as { success: boolean; message?: string }
+
+      if (!result.success) {
+        return { success: false, error: result.message || 'ไม่สามารถยกเลิกลิขสิทธิ์กับเซิร์ฟเวอร์ได้' }
+      }
+
+      // ✔ Server confirmed — Clear activation atomically in SQLite NOW
+      db.prepare(`
+        UPDATE activation
+        SET is_activated = 0,
+            license_key  = NULL,
+            hardware_id  = NULL,
+            email        = NULL,
+            activated_at = NULL
+        WHERE id = 1
+      `).run()
+
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: `ข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์: ${String(error)}` }
     }
   })
 

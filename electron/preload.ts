@@ -133,6 +133,8 @@ const api = {
     restore: (filePath: string) => ipcRenderer.invoke('backup:restore', filePath),
     list: () => ipcRenderer.invoke('backup:list'),
     setAutoBackup: (config: Record<string, unknown>) => ipcRenderer.invoke('backup:setAutoBackup', config),
+    triggerSilentBackup: () => ipcRenderer.invoke('backup:silent-trigger'),
+    exportCustom: (targetDir: string) => ipcRenderer.invoke('backup:export-custom', targetDir),
   },
 
   // Dialog
@@ -175,6 +177,7 @@ const api = {
     checkActivation: () => ipcRenderer.invoke('system:check-activation'),
     activateLicense: (licenseKey: string, email: string, hardwareId: string) =>
       ipcRenderer.invoke('system:activate-license', { licenseKey, email, hardwareId }),
+    deactivateLicense: () => ipcRenderer.invoke('system:deactivate-license'),
   },
 }
 

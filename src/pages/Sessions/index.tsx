@@ -23,6 +23,7 @@ export default function SessionsPage() {
   const [cashType, setCashType] = useState<'in' | 'out'>('in')
   const [cashAmount, setCashAmount] = useState('')
   const [cashReason, setCashReason] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   const fetchActiveSession = async () => {
     if (!api?.sessions) return
@@ -62,6 +63,7 @@ export default function SessionsPage() {
     if (!openAmount || parseFloat(openAmount) < 0) { toast.error('กรุณากรอกยอดเปิดกะ'); return }
     const sessionData = { user_id: user?.id, open_amount: parseFloat(openAmount) }
     
+    setSubmitting(true)
     try {
       if (api) {
         const res = await api.sessions.open(sessionData)
@@ -77,14 +79,26 @@ export default function SessionsPage() {
       fetchHistory()
     } catch (e) {
       toast.error('เปิดกะล้มเหลว: ' + String(e))
+    } finally {
+      setSubmitting(false)
     }
   }
 
   const handleCloseSession = async () => {
     if (!closeAmount) { toast.error('กรุณากรอกยอดเงินในลิ้นชัก'); return }
     
+    setSubmitting(true)
     try {
       if (api) {
+        // Trigger 2: Silent Backup Trigger on Shift Close (Day Close)
+        // This ensures the current state of transaction records is backed up permanently
+        try {
+          await api.backup.triggerSilentBackup()
+          console.log('[Shift Close] Auto Backup Completed')
+        } catch (err) {
+          console.error('[Shift Close] Auto Backup Failed:', err)
+        }
+
         const res = await api.sessions.close({ close_amount: parseFloat(closeAmount) })
         if (!res.success) {
           toast.error(res.error || 'เกิดข้อผิดพลาดในการปิดกะ')
@@ -99,6 +113,8 @@ export default function SessionsPage() {
       fetchHistory()
     } catch (e) {
       toast.error('ปิดกะล้มเหลว: ' + String(e))
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -297,8 +313,21 @@ export default function SessionsPage() {
               <input className="glass-input" type="number" value={openAmount} onChange={e => setOpenAmount(e.target.value)} placeholder="1000" autoFocus style={{ fontSize: 18, fontWeight: 700 }} />
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={() => setShowOpen(false)} className="glass-btn btn-secondary" style={{ flex: 1, fontSize: 13 }}>ยกเลิก</button>
-              <button onClick={handleOpenSession} className="glass-btn btn-primary" style={{ flex: 1, fontSize: 13, fontWeight: 700 }}>เปิดกะ</button>
+              <button onClick={() => !submitting && setShowOpen(false)} disabled={submitting} className="glass-btn btn-secondary" style={{ flex: 1, fontSize: 13, cursor: submitting ? 'not-allowed' : 'pointer' }}>ยกเลิก</button>
+              <button 
+                onClick={handleOpenSession} 
+                disabled={submitting}
+                className="glass-btn btn-primary" 
+                style={{ 
+                  flex: 1, 
+                  fontSize: 13, 
+                  fontWeight: 700,
+                  cursor: submitting ? 'not-allowed' : 'pointer',
+                  opacity: submitting ? 0.7 : 1,
+                }}
+              >
+                {submitting ? 'กำลังเปิดกะ...' : 'เปิดกะ'}
+              </button>
             </div>
           </div>
         </div>
@@ -331,8 +360,21 @@ export default function SessionsPage() {
               <input className="glass-input" type="number" value={closeAmount} onChange={e => setCloseAmount(e.target.value)} placeholder="0.00" autoFocus style={{ fontSize: 18, fontWeight: 700 }} />
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={() => setShowClose(false)} className="glass-btn btn-secondary" style={{ flex: 1, fontSize: 13 }}>ยกเลิก</button>
-              <button onClick={handleCloseSession} className="glass-btn btn-danger" style={{ flex: 1, fontSize: 13, fontWeight: 700 }}>ปิดกะ</button>
+              <button onClick={() => !submitting && setShowClose(false)} disabled={submitting} className="glass-btn btn-secondary" style={{ flex: 1, fontSize: 13, cursor: submitting ? 'not-allowed' : 'pointer' }}>ยกเลิก</button>
+              <button 
+                onClick={handleCloseSession} 
+                disabled={submitting}
+                className="glass-btn btn-danger" 
+                style={{ 
+                  flex: 1, 
+                  fontSize: 13, 
+                  fontWeight: 700,
+                  cursor: submitting ? 'not-allowed' : 'pointer',
+                  opacity: submitting ? 0.7 : 1,
+                }}
+              >
+                {submitting ? 'กำลังปิดกะ & แบ็กอัพ...' : 'ปิดกะ'}
+              </button>
             </div>
           </div>
         </div>

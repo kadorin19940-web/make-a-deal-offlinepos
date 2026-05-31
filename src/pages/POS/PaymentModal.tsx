@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { X, Banknote, CreditCard, Smartphone, Layers, Delete, CheckCircle, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { CartItem, Customer, PaymentMethod } from '../../types'
+import { useSettingsStore } from '../../store'
+import { QRCodeSVG } from 'qrcode.react'
 
 const api = (window as any).api
 
@@ -29,6 +31,7 @@ export default function PaymentModal({
   const [receiptNo, setReceiptNo] = useState('')
   const [loading, setLoading] = useState(false)
   const [pointsToUse, setPointsToUse] = useState(0)
+  const { settings } = useSettingsStore()
 
   const cashAmount = parseFloat(cashInput) || 0
   const change = method === 'cash' ? Math.max(cashAmount - total + pointsToUse * 0.1, 0) : 0
@@ -319,26 +322,48 @@ export default function PaymentModal({
               )}
 
               {/* QR */}
-              {method === 'qr' && (
-                <div style={{ textAlign: 'center', padding: '16px 0' }}>
-                  <div style={{
-                    width: 160, height: 160, margin: '0 auto 12px',
-                    background: 'white', borderRadius: 12, padding: 16,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}>
-                    {/* QR placeholder */}
+              {method === 'qr' && (() => {
+                const promptpayId = settings.promptpay_id || settings.shop_phone || settings.shop_tax_id || '';
+                const cleanId = promptpayId.replace(/\D/g, '');
+                const hasValidPromptPay = cleanId.length >= 9 && cleanId.length <= 15;
+                const payload = hasValidPromptPay ? generatePromptPayPayload(cleanId, total) : '';
+
+                return (
+                  <div style={{ textAlign: 'center', padding: '16px 0' }}>
                     <div style={{
-                      width: '100%', height: '100%',
-                      background: 'repeating-conic-gradient(#000 0% 25%, #fff 0% 50%) 0/12px 12px',
-                      borderRadius: 4, opacity: 0.8,
-                    }} />
+                      width: 160, height: 160, margin: '0 auto 12px',
+                      background: 'white', borderRadius: 12, padding: 16,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      {hasValidPromptPay ? (
+                        <QRCodeSVG value={payload} size={128} />
+                      ) : (
+                        <div style={{
+                          width: '100%',
+                          height: '100%',
+                          background: 'rgba(239,68,68,0.1)',
+                          border: '2px dashed rgba(239,68,68,0.3)',
+                          borderRadius: 8,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: 10,
+                          color: '#fca5a5',
+                          fontSize: 11,
+                          fontWeight: 600,
+                          lineHeight: 1.4
+                        }}>
+                          กรุณาตั้งค่าเบอร์พร้อมเพย์<br />ที่เมนูตั้งค่าร้านค้า
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, marginBottom: 4 }}>
+                      {hasValidPromptPay ? `สแกน QR PromptPay (${promptpayId})` : 'ไม่พบข้อมูลรับเงินพร้อมเพย์'}
+                    </div>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: '#22c55e' }}>{fmt(total)}</div>
                   </div>
-                  <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, marginBottom: 4 }}>
-                    สแกน QR PromptPay
-                  </div>
-                  <div style={{ fontSize: 22, fontWeight: 800, color: '#22c55e' }}>{fmt(total)}</div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Loyalty points */}
               {customer && customer.points >= 100 && (
@@ -375,7 +400,15 @@ export default function PaymentModal({
                 onClick={handlePay}
                 disabled={loading || (method === 'cash' && cashAmount < total - pointsToUse * 0.1 && cashInput !== '')}
                 className="glass-btn btn-primary"
-                style={{ width: '100%', padding: '15px', fontSize: 16, fontWeight: 800 }}
+                style={{ 
+                  width: '100%', 
+                  padding: '15px', 
+                  fontSize: 16, 
+                  fontWeight: 800,
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  opacity: loading ? 0.7 : 1,
+                  transition: 'all 0.2s'
+                }}
               >
                 {loading ? 'กำลังบันทึก...' : `ยืนยันการชำระ ${fmt(total)}`}
               </button>
@@ -396,4 +429,66 @@ function Row({ label, value, highlight, color }: { label: string; value: string;
       </span>
     </div>
   )
+}
+
+function crc16(data: string): string {
+  let crc = 0xFFFF;
+  for (let i = 0; i < data.length; i++) {
+    crc ^= data.charCodeAt(i) << 8;
+    for (let j = 0; j < 8; j++) {
+      if ((crc & 0x8000) !== 0) {
+        crc = (crc << 1) ^ 0x1021;
+      } else {
+        crc = crc << 1;
+      }
+    }
+  }
+  return (crc & 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+}
+
+function generatePromptPayPayload(target: string, amount?: number): string {
+  const cleanTarget = target.replace(/\D/g, '');
+  let formattedTarget = '';
+  
+  if (cleanTarget.length === 15) {
+    // E-Wallet ID
+    formattedTarget = cleanTarget;
+  } else if (cleanTarget.length === 13) {
+    // Tax ID / National ID
+    formattedTarget = cleanTarget;
+  } else if (cleanTarget.length >= 9) {
+    // Phone Number - pad 66 and strip leading 0
+    let phone = cleanTarget;
+    if (phone.startsWith('0')) {
+      phone = '66' + phone.slice(1);
+    } else if (!phone.startsWith('66')) {
+      phone = '66' + phone;
+    }
+    // Pad to 13 digits with leading 00
+    formattedTarget = '00' + phone;
+  } else {
+    return '';
+  }
+
+  const merchantInfoType = cleanTarget.length === 13 ? '02' : '01';
+  const payloadSegments = [
+    '000201',
+    '010212', // 12 for dynamic (with amount)
+    '29' + String(24 + formattedTarget.length).padStart(2, '0') + 
+      '0016A000000677010111' + 
+      merchantInfoType + String(formattedTarget.length).padStart(2, '0') + formattedTarget,
+    '5802TH',
+    '5303764'
+  ];
+
+  if (amount !== undefined && amount > 0) {
+    const amountStr = amount.toFixed(2);
+    payloadSegments.push('54' + String(amountStr.length).padStart(2, '0') + amountStr);
+  }
+
+  payloadSegments.push('6304');
+
+  const partialPayload = payloadSegments.join('');
+  const checksum = crc16(partialPayload);
+  return partialPayload + checksum;
 }
