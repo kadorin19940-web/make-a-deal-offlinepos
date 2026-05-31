@@ -15,6 +15,16 @@ const checkAdmin = (db: Database.Database, userId: number | undefined): boolean 
   }
 }
 
+const checkAdminOrManager = (db: Database.Database, userId: number | undefined): boolean => {
+  if (!userId) return false
+  try {
+    const user = db.prepare('SELECT role FROM users WHERE id = ? AND is_active = 1').get(userId) as { role: string } | undefined
+    return !!user && (user.role.toLowerCase() === 'admin' || user.role.toLowerCase() === 'manager')
+  } catch {
+    return false
+  }
+}
+
 // Garbage collection helper to delete unlinked images from userData/images
 const deleteImageFile = (fileName: string | undefined) => {
   if (!fileName) return
@@ -320,8 +330,8 @@ export function registerReportHandlers(db: Database.Database) {
 
   ipcMain.handle('reports:getSalesSummary', (_, filters: Record<string, any>) => {
     try {
-      if (!checkAdmin(db, filters.userId)) {
-        return { success: false, error: 'Unauthorized: Admin privileges required.' }
+      if (!checkAdminOrManager(db, filters.userId)) {
+        return { success: false, error: 'Unauthorized: Admin or Manager privileges required.' }
       }
 
       const summary = db.prepare(`
@@ -347,8 +357,8 @@ export function registerReportHandlers(db: Database.Database) {
 
   ipcMain.handle('reports:getSalesChart', (_, filters: Record<string, any>) => {
     try {
-      if (!checkAdmin(db, filters.userId)) {
-        return { success: false, error: 'Unauthorized: Admin privileges required.' }
+      if (!checkAdminOrManager(db, filters.userId)) {
+        return { success: false, error: 'Unauthorized: Admin or Manager privileges required.' }
       }
 
       const chart = db.prepare(`
@@ -371,8 +381,8 @@ export function registerReportHandlers(db: Database.Database) {
 
   ipcMain.handle('reports:getTopProducts', (_, filters: Record<string, any>) => {
     try {
-      if (!checkAdmin(db, filters.userId)) {
-        return { success: false, error: 'Unauthorized: Admin privileges required.' }
+      if (!checkAdminOrManager(db, filters.userId)) {
+        return { success: false, error: 'Unauthorized: Admin or Manager privileges required.' }
       }
 
       const products = db.prepare(`
@@ -392,8 +402,8 @@ export function registerReportHandlers(db: Database.Database) {
 
   ipcMain.handle('reports:getTopCustomers', (_, filters: Record<string, any>) => {
     try {
-      if (!checkAdmin(db, filters.userId)) {
-        return { success: false, error: 'Unauthorized: Admin privileges required.' }
+      if (!checkAdminOrManager(db, filters.userId)) {
+        return { success: false, error: 'Unauthorized: Admin or Manager privileges required.' }
       }
 
       const customers = db.prepare(`
@@ -435,8 +445,8 @@ export function registerReportHandlers(db: Database.Database) {
   // Advanced Export to Excel with Date Range Filter and Anti-Memory Leak protection
   ipcMain.handle('reports:exportSalesExcel', async (_, filters: { from_date: string; to_date: string; filePath: string; userId: number }) => {
     try {
-      if (!checkAdmin(db, filters.userId)) {
-        return { success: false, error: 'Unauthorized: Admin privileges required.' }
+      if (!checkAdminOrManager(db, filters.userId)) {
+        return { success: false, error: 'Unauthorized: Admin or Manager privileges required.' }
       }
 
       const { from_date, to_date, filePath } = filters
@@ -711,11 +721,23 @@ export function registerSessionHandlers(db: Database.Database) {
 
   ipcMain.handle('sessions:getAll', (_, filters: Record<string, unknown> = {}) => {
     try {
-      const sessions = db.prepare(`
+      let query = `
         SELECT cs.*, u.name as user_name FROM cash_sessions cs
         LEFT JOIN users u ON cs.user_id = u.id
-        ORDER BY cs.id DESC LIMIT 50
-      `).all()
+        WHERE 1=1
+      `
+      const params: any[] = []
+      if (filters.from_date) {
+        query += " AND DATE(cs.open_time) >= ?"
+        params.push(filters.from_date)
+      }
+      if (filters.to_date) {
+        query += " AND DATE(cs.open_time) <= ?"
+        params.push(filters.to_date)
+      }
+      query += " ORDER BY cs.id DESC LIMIT 200"
+      
+      const sessions = db.prepare(query).all(...params)
       return { success: true, data: sessions }
     } catch (error) { return { success: false, error: String(error) } }
   })
@@ -743,6 +765,80 @@ export function registerSessionHandlers(db: Database.Database) {
     try {
       db.prepare('DELETE FROM cash_transactions WHERE session_id = ?').run(id)
       db.prepare('DELETE FROM cash_sessions WHERE id = ?').run(id)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('sessions:exportExcel', async (_, filters: { from_date: string; to_date: string; filePath: string; userId: number }) => {
+    try {
+      // Allow Admin and Manager to export Excel
+      const user = db.prepare('SELECT role FROM users WHERE id = ? AND is_active = 1').get(filters.userId) as { role: string } | undefined
+      const isAuth = !!user && (user.role.toLowerCase() === 'admin' || user.role.toLowerCase() === 'manager')
+      if (!isAuth) {
+        return { success: false, error: 'Unauthorized: Admin or Manager privileges required.' }
+      }
+
+      const { from_date, to_date, filePath } = filters
+      const ws = XLSX.utils.json_to_sheet([])
+
+      // Write Header
+      const headers = [
+        "กะที่",
+        "วันที่/เวลาเปิดกะ",
+        "วันที่/เวลาปิดกะ",
+        "ชื่อพนักงานแคชเชียร์",
+        "ยอดเงินทอนเริ่มต้น (บาท)",
+        "ยอดขายรวม (บาท)",
+        "ยอดขายเงินสด (บาท)",
+        "ยอดขายบัตร (บาท)",
+        "ยอดขายเงินโอน (บาท)",
+        "ยอดขาย QR (บาท)",
+        "ยอดส่งกะจริง (บาท)",
+        "ยอดกะที่ควรมี (บาท)",
+        "ผลต่าง (บาท)",
+        "สถานะ",
+        "หมายเหตุ"
+      ]
+      XLSX.utils.sheet_add_aoa(ws, [headers], { origin: 'A1' })
+
+      const sessions = db.prepare(`
+        SELECT cs.*, u.name as user_name FROM cash_sessions cs
+        LEFT JOIN users u ON cs.user_id = u.id
+        WHERE DATE(cs.open_time) BETWEEN ? AND ?
+        ORDER BY cs.id ASC
+      `).all(from_date, to_date) as any[]
+
+      const mapped = sessions.map(s => {
+        const expected = (s.open_amount || 0) + (s.cash_sales || 0) - (s.total_void || 0)
+        return [
+          s.id,
+          s.open_time,
+          s.close_time || 'ยังไม่ปิดกะ',
+          s.user_name || 'ไม่ระบุ',
+          Number(s.open_amount) || 0,
+          Number(s.total_sales) || 0,
+          Number(s.cash_sales) || 0,
+          Number(s.card_sales) || 0,
+          Number(s.transfer_sales) || 0,
+          Number(s.qr_sales) || 0,
+          s.close_amount !== null ? Number(s.close_amount) : 'ยังไม่ปิดกะ',
+          s.close_amount !== null ? Number(expected) : 'ยังไม่ปิดกะ',
+          s.difference !== null ? Number(s.difference) : 'ยังไม่ปิดกะ',
+          s.status === 'open' ? 'เปิดอยู่' : 'ปิดแล้ว',
+          s.note || ''
+        ]
+      })
+
+      XLSX.utils.sheet_add_aoa(ws, mapped, { origin: 'A2' })
+
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'รายงานประวัติกะ')
+      
+      const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' })
+      fs.writeFileSync(filePath, buffer)
+
       return { success: true }
     } catch (error) {
       return { success: false, error: String(error) }

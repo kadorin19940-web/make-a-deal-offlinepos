@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { DollarSign, Play, Square, ArrowUp, ArrowDown, Clock, X, Trash2 } from 'lucide-react'
+import { DollarSign, Play, Square, ArrowUp, ArrowDown, Clock, X, Trash2, FileSpreadsheet, Calendar, Loader } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useSessionStore, useAuthStore } from '../../store'
 import type { CashSession } from '../../types'
-import { format } from 'date-fns'
+import { format, subDays } from 'date-fns'
 import { th } from 'date-fns/locale'
 
 const api = (window as any).api
@@ -12,9 +12,11 @@ export default function SessionsPage() {
   const { currentSession, setSession } = useSessionStore()
   const { user } = useAuthStore()
   const isAdmin = user?.role === 'admin'
+  const isManagerOrAdmin = user?.role === 'admin' || user?.role === 'manager'
 
   const [history, setHistory] = useState<CashSession[]>([])
   const [loading, setLoading] = useState(true)
+  const [exporting, setExporting] = useState(false)
   const [showOpen, setShowOpen] = useState(false)
   const [showClose, setShowClose] = useState(false)
   const [showCash, setShowCash] = useState(false)
@@ -24,6 +26,10 @@ export default function SessionsPage() {
   const [cashAmount, setCashAmount] = useState('')
   const [cashReason, setCashReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  // Date filters
+  const [startDate, setStartDate] = useState(format(subDays(new Date(), 29), 'yyyy-MM-dd'))
+  const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'))
 
   const fetchActiveSession = async () => {
     if (!api?.sessions) return
@@ -43,7 +49,7 @@ export default function SessionsPage() {
     if (!api?.sessions) return
     try {
       setLoading(true)
-      const res = await api.sessions.getAll()
+      const res = await api.sessions.getAll({ from_date: startDate, to_date: endDate })
       if (res.success) {
         setHistory(res.data)
       }
@@ -56,8 +62,30 @@ export default function SessionsPage() {
 
   useEffect(() => {
     fetchActiveSession()
-    fetchHistory()
   }, [])
+
+  useEffect(() => {
+    fetchHistory()
+  }, [startDate, endDate])
+
+  const setQuickRange = (rangeType: 'today' | '7d' | '30d' | 'this_month') => {
+    const today = new Date()
+    if (rangeType === 'today') {
+      const dateStr = format(today, 'yyyy-MM-dd')
+      setStartDate(dateStr)
+      setEndDate(dateStr)
+    } else if (rangeType === '7d') {
+      setStartDate(format(subDays(today, 6), 'yyyy-MM-dd'))
+      setEndDate(format(today, 'yyyy-MM-dd'))
+    } else if (rangeType === '30d') {
+      setStartDate(format(subDays(today, 29), 'yyyy-MM-dd'))
+      setEndDate(format(today, 'yyyy-MM-dd'))
+    } else if (rangeType === 'this_month') {
+      const firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
+      setStartDate(format(firstDay, 'yyyy-MM-dd'))
+      setEndDate(format(today, 'yyyy-MM-dd'))
+    }
+  }
 
   const handleOpenSession = async () => {
     if (!openAmount || parseFloat(openAmount) < 0) { toast.error('กรุณากรอกยอดเปิดกะ'); return }
@@ -172,11 +200,69 @@ export default function SessionsPage() {
     }
   }
 
+  const handleExportExcel = async () => {
+    if (exporting || !user) return
+    if (!isManagerOrAdmin) {
+      toast.error('ขออภัย เฉพาะผู้ดูแลระบบ (Admin) หรือผู้จัดการ (Manager) เท่านั้นที่มีสิทธิ์ส่งออกประวัติกะ')
+      return
+    }
+
+    setExporting(true)
+    const toastId = toast.loading('กำลังประมวลผลข้อมูลประวัติกะในระบบ...')
+
+    try {
+      if (api) {
+        const defaultName = `รายงานประวัติกะ_${startDate}_ถึง_${endDate}.xlsx`
+        const saveRes = await api.dialog.saveFile(defaultName, [{ name: 'Excel Files', extensions: ['xlsx'] }])
+        
+        if (saveRes.filePath) {
+          const res = await api.sessions.exportExcel({
+            from_date: startDate,
+            to_date: endDate,
+            filePath: saveRes.filePath,
+            userId: user.id
+          })
+          if (res.success) {
+            toast.success('ส่งออกรายงานกะ Excel สำเร็จแล้ว!', { id: toastId })
+          } else {
+            throw new Error(res.error || 'เขียนไฟล์ล้มเหลว')
+          }
+        } else {
+          toast.dismiss(toastId)
+        }
+      } else {
+        toast.error('ระบบเครื่องมือจัดเก็บไฟล์ไม่ทำงานบนบราวเซอร์ภายนอก', { id: toastId })
+      }
+    } catch (error) {
+      console.error(error)
+      toast.error(`ส่งออกล้มเหลว: ${String(error)}`, { id: toastId })
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const fmt = (n: number) => `฿${(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })}`
   const fmtDate = (d: string) => { try { return format(new Date(d), 'dd MMM yyyy HH:mm', { locale: th }) } catch { return d } }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, position: 'relative' }}>
+      {/* Blurred Full-screen Loading Overlay for Exporting */}
+      {exporting && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-center justify-center animate-fade-in" style={{ zIndex: 9999 }}>
+          <div className="bg-[#0a0a0f]/80 p-8 rounded-2xl border border-white/10 shadow-2xl flex flex-col items-center gap-4 max-w-sm text-center">
+            <div className="w-12 h-12 rounded-full border-4 border-green-500/20 border-t-green-500 animate-spin flex items-center justify-center">
+              <FileSpreadsheet size={20} className="text-green-400" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white mb-1">กำลังเขียนรายงานกะ Excel...</h3>
+              <p className="text-xs text-gray-400">
+                ระบบกำลังดึงข้อมูลประวัติกะและธุรกรรมจากฐานข้อมูล SQLite เพื่อบันทึกเป็นไฟล์ Excel
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Current session card */}
       <div style={{
         background: currentSession
@@ -232,9 +318,92 @@ export default function SessionsPage() {
         )}
       </div>
 
-      {/* Session History */}
+      {/* Session History section */}
       <div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,0.8)', marginBottom: 12 }}>ประวัติกะ</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,0.8)' }}>ประวัติกะ</div>
+        </div>
+
+        {/* Date Picker & Quick Range controls */}
+        <div className="glass-card" style={{
+          background: 'rgba(255,255,255,0.02)',
+          border: '1px solid rgba(255,255,255,0.06)',
+          borderRadius: 16,
+          padding: 16,
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+          marginBottom: 12
+        }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+            <Calendar size={16} className="text-green-400" />
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.9)', marginRight: 8 }}>ช่วงเวลาตัวกรอง:</span>
+            {[
+              { type: 'today', label: 'วันนี้' },
+              { type: '7d', label: '7 วันล่าสุด' },
+              { type: '30d', label: '30 วันล่าสุด' },
+              { type: 'this_month', label: 'เดือนนี้' }
+            ].map(btn => (
+              <button
+                key={btn.type}
+                onClick={() => setQuickRange(btn.type as any)}
+                className="glass-btn btn-secondary"
+                style={{ fontSize: 11, padding: '6px 12px' }}
+              >
+                {btn.label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+              <span style={{ color: 'rgba(255,255,255,0.5)' }}>เริ่ม:</span>
+              <input
+                type="date"
+                className="glass-input"
+                value={startDate}
+                onChange={e => setStartDate(e.target.value)}
+                style={{ background: 'rgba(255,255,255,0.03)', padding: '5px 10px', fontSize: 12, width: 130, height: 32, borderRadius: 8, color: '#fff' }}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+              <span style={{ color: 'rgba(255,255,255,0.5)' }}>ถึง:</span>
+              <input
+                type="date"
+                className="glass-input"
+                value={endDate}
+                onChange={e => setEndDate(e.target.value)}
+                style={{ background: 'rgba(255,255,255,0.03)', padding: '5px 10px', fontSize: 12, width: 130, height: 32, borderRadius: 8, color: '#fff' }}
+              />
+            </div>
+
+            {isManagerOrAdmin && (
+              <button
+                onClick={handleExportExcel}
+                disabled={exporting || loading}
+                className="glass-btn btn-primary"
+                style={{
+                  fontSize: 12,
+                  padding: '6px 16px',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  opacity: exporting || loading ? 0.5 : 1,
+                  cursor: exporting || loading ? 'not-allowed' : 'pointer',
+                  height: 32
+                }}
+              >
+                {exporting ? <Loader size={12} className="animate-spin" /> : <FileSpreadsheet size={13} />}
+                ส่งออกประวัติกะ
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* History Table */}
         <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 16, overflow: 'hidden' }}>
           <table className="data-table">
             <thead>
@@ -253,13 +422,16 @@ export default function SessionsPage() {
               {loading ? (
                 <tr>
                   <td colSpan={8} style={{ textAlign: 'center', paddingTop: 32, paddingBottom: 32, color: 'rgba(255,255,255,0.3)' }}>
-                    กำลังโหลดข้อมูลประวัติกะ...
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                      <Loader size={16} className="animate-spin text-green-500" />
+                      กำลังโหลดข้อมูลประวัติกะ...
+                    </div>
                   </td>
                 </tr>
               ) : history.length === 0 ? (
                 <tr>
                   <td colSpan={8} style={{ textAlign: 'center', paddingTop: 32, paddingBottom: 32, color: 'rgba(255,255,255,0.3)' }}>
-                    ไม่มีข้อมูลประวัติการทำงานกะ
+                    ไม่มีข้อมูลประวัติการทำงานกะในช่วงเวลานี้
                   </td>
                 </tr>
               ) : (

@@ -7,7 +7,7 @@ import {
   ArrowLeft
 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { useCartStore, useAuthStore, useSettingsStore } from '../../store'
+import { useCartStore, useAuthStore, useSettingsStore, useSessionStore } from '../../store'
 import type { Product, Category, Customer, CartItem, Promotion } from '../../types'
 import PaymentModal from './PaymentModal'
 import CustomerSearchModal from './CustomerSearchModal'
@@ -48,6 +48,29 @@ export default function POSPage() {
 
   const { user } = useAuthStore()
   const { settings } = useSettingsStore()
+  const { currentSession, setSession } = useSessionStore()
+
+  // Session check - Force shift to be open before using POS
+  useEffect(() => {
+    const checkActiveSession = async () => {
+      if ((window as any).api?.sessions) {
+        const res = await (window as any).api.sessions.getCurrent()
+        if (res.success && res.data) {
+          setSession(res.data)
+        } else {
+          setSession(null)
+          toast.error('กรุณาเปิดกะทำงานก่อนเข้าใช้งานหน้าขาย!', { duration: 4000 })
+          navigate('/sessions')
+        }
+      } else {
+        if (!currentSession) {
+          toast.error('กรุณาเปิดกะทำงานก่อนเข้าใช้งานหน้าขาย!', { duration: 4000 })
+          navigate('/sessions')
+        }
+      }
+    }
+    checkActiveSession()
+  }, [navigate])
 
   // Load data
   useEffect(() => {

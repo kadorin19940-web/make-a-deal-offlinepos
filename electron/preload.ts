@@ -37,6 +37,9 @@ const api = {
     getHeldOrders: () => ipcRenderer.invoke('sales:getHeldOrders'),
     deleteHeldOrder: (id: number) => ipcRenderer.invoke('sales:deleteHeldOrder', id),
     generateReceiptNo: () => ipcRenderer.invoke('sales:generateReceiptNo'),
+    getSaleItemsReport: (filters: Record<string, any>) => ipcRenderer.invoke('sales:getSaleItemsReport', filters),
+    updateSale: (saleId: number, data: Record<string, any>, userId?: number) => ipcRenderer.invoke('sales:updateSale', saleId, data, userId),
+    delete: (id: number, userId?: number) => ipcRenderer.invoke('sales:delete', id, userId),
   },
 
   // Customers
@@ -110,6 +113,7 @@ const api = {
     addTransaction: (data: Record<string, unknown>) => ipcRenderer.invoke('sessions:addTransaction', data),
     getTransactions: (sessionId: number) => ipcRenderer.invoke('sessions:getTransactions', sessionId),
     delete: (id: number) => ipcRenderer.invoke('sessions:delete', id),
+    exportExcel: (filters: Record<string, any>) => ipcRenderer.invoke('sessions:exportExcel', filters),
   },
 
   // Promotions

@@ -130,8 +130,21 @@ export function registerProductHandlers(db: Database.Database) {
         }
       }
 
-      const fields = Object.keys(data).map(k => `${k} = @${k}`).join(', ')
-      db.prepare(`UPDATE products SET ${fields}, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ ...data, id })
+      // Filter only actual database columns to avoid SQL column mismatch errors
+      const validColumns = [
+        'barcode', 'sku', 'name', 'name_en', 'description', 'category_id', 'unit',
+        'cost_price', 'sell_price', 'sell_price2', 'sell_price3', 'stock_qty', 'min_stock', 'max_stock',
+        'image_path', 'is_service', 'is_active', 'has_variants', 'tax_rate'
+      ]
+      const updateData: Record<string, any> = {}
+      for (const col of validColumns) {
+        if (data[col] !== undefined) {
+          updateData[col] = data[col]
+        }
+      }
+
+      const fields = Object.keys(updateData).map(k => `${k} = @${k}`).join(', ')
+      db.prepare(`UPDATE products SET ${fields}, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ ...updateData, id })
       return { success: true }
     } catch (error) {
       return { success: false, error: String(error) }

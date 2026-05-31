@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid } from 'recharts'
-import { Download, Calendar, Loader, TrendingUp, DollarSign, Receipt, Percent, FileSpreadsheet, Users } from 'lucide-react'
+import { Download, Calendar, Loader, TrendingUp, DollarSign, Receipt, Percent, FileSpreadsheet, Users, Trash2, Edit2 } from 'lucide-react'
 import { format, subDays } from 'date-fns'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '../../store'
@@ -13,7 +13,7 @@ export default function ReportsPage() {
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
-  const [tab, setTab] = useState<'sales' | 'products' | 'customers'>('sales')
+  const [tab, setTab] = useState<'sales' | 'pivot' | 'products' | 'customers'>('sales')
 
   // Live database data states
   const [summary, setSummary] = useState({
@@ -27,8 +27,21 @@ export default function ReportsPage() {
   const [chartData, setChartData] = useState<any[]>([])
   const [topProducts, setTopProducts] = useState<any[]>([])
   const [topCustomers, setTopCustomers] = useState<any[]>([])
+  const [saleItems, setSaleItems] = useState<any[]>([])
+  const [editingSale, setEditingSale] = useState<any | null>(null)
 
-  const isAdmin = currentUser?.role?.toLowerCase() === 'admin'
+  const isAdmin = currentUser?.role?.toLowerCase() === 'admin' || currentUser?.role?.toLowerCase() === 'manager'
+
+  const fmtDate = (d: string) => {
+    try {
+      const date = new Date(d)
+      if (isNaN(date.getTime())) return d
+      const pad = (n: number) => String(n).padStart(2, '0')
+      return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+    } catch {
+      return d
+    }
+  }
 
   // Fetch all report data based on current dates and role verification
   const fetchReportData = async () => {
@@ -79,11 +92,45 @@ export default function ReportsPage() {
         setTopCustomers(customersRes.data)
       }
 
+      // 5. Fetch Daily Sale Items (Pivot Report)
+      const pivotRes = await api.sales.getSaleItemsReport(filters)
+      if (pivotRes.success) {
+        setSaleItems(pivotRes.data)
+      }
+
     } catch (err) {
       console.error(err)
       toast.error('เกิดข้อผิดพลาดในการเชื่อมต่อฐานข้อมูลรายงาน')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleDeleteSale = async (saleId: number, receiptNo: string) => {
+    if (!confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบใบเสร็จเลขที่ ${receiptNo}?\nการดำเนินการนี้จะลบธุรกรรมและปรับสต็อกสินค้าคืนคลังถาวร!`)) return
+    try {
+      const res = await api.sales.delete(saleId, currentUser?.id)
+      if (res.success) {
+        toast.success('ลบใบเสร็จเรียบร้อยแล้ว คืนสต็อกและอัปเดตยอดกะสำเร็จ')
+        fetchReportData()
+      } else {
+        toast.error(res.error || 'ลบใบเสร็จล้มเหลว')
+      }
+    } catch (e) {
+      toast.error('เกิดข้อผิดพลาด: ' + String(e))
+    }
+  }
+
+  const handleEditSale = async (saleId: number) => {
+    try {
+      const res = await api.sales.getById(saleId)
+      if (res.success && res.data) {
+        setEditingSale(res.data)
+      } else {
+        toast.error(res.error || 'ไม่สามารถโหลดข้อมูลใบเสร็จได้')
+      }
+    } catch (e) {
+      toast.error('เกิดข้อผิดพลาด: ' + String(e))
     }
   }
 
@@ -330,6 +377,7 @@ export default function ReportsPage() {
           <div className="flex border-b border-white/5 gap-1">
             {[
               { id: 'sales', label: 'วิเคราะห์ยอดขายและผลประกอบการ', icon: <TrendingUp size={14} /> },
+              { id: 'pivot', label: 'ตารางยอดขายรายวัน (Pivot)', icon: <FileSpreadsheet size={14} /> },
               { id: 'products', label: 'สินค้าขายดี / ตารางผลตอบแทน', icon: <FileSpreadsheet size={14} /> },
               { id: 'customers', label: 'ประวัติลูกค้ามูลค่าสูง', icon: <Users size={14} /> }
             ].map(t => (
@@ -393,6 +441,66 @@ export default function ReportsPage() {
                   </ResponsiveContainer>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Daily Sales Pivot Table View */}
+          {tab === 'pivot' && (
+            <div className="glass-card overflow-hidden">
+              {saleItems.length === 0 ? (
+                <div className="p-12 text-center text-gray-500 text-xs">ไม่พบรายการขายสินค้าในช่วงเวลาที่ระบุ</div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="data-table w-full">
+                    <thead>
+                      <tr className="border-b border-white/5 bg-white/[0.01]">
+                        <th className="px-5 py-3.5 text-left text-xs font-bold text-gray-400">วดป / เวลา</th>
+                        <th className="px-5 py-3.5 text-left text-xs font-bold text-gray-400">เลขที่ใบเสร็จ</th>
+                        <th className="px-5 py-3.5 text-left text-xs font-bold text-gray-400">SKU รหัสสินค้า</th>
+                        <th className="px-5 py-3.5 text-left text-xs font-bold text-gray-400">ชื่อสินค้า</th>
+                        <th className="px-5 py-3.5 text-left text-xs font-bold text-gray-400">แคชเชียร์</th>
+                        <th className="px-5 py-3.5 text-center text-xs font-bold text-gray-400">จำนวน</th>
+                        <th className="px-5 py-3.5 text-right text-xs font-bold text-gray-400">ยอดรวม</th>
+                        <th className="px-5 py-3.5 text-center text-xs font-bold text-gray-400">สถานะ</th>
+                        <th className="px-5 py-3.5 text-center text-xs font-bold text-gray-400" style={{ width: 100 }}>การจัดการ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {saleItems.map((item: any, i: number) => {
+                        const isVoid = item.status === 'void'
+                        return (
+                          <tr key={i} className="border-b border-white/5 hover:bg-white/[0.02] transition" style={isVoid ? { opacity: 0.4 } : {}}>
+                            <td className="px-5 py-4 text-xs text-gray-300 font-medium">{fmtDate(item.sale_date)}</td>
+                            <td className="px-5 py-4 text-xs font-bold text-white">{item.receipt_no}</td>
+                            <td className="px-5 py-4 text-xs text-gray-400 font-mono">{item.sku || '—'}</td>
+                            <td className="px-5 py-4 font-bold text-white text-sm">{item.product_name}</td>
+                            <td className="px-5 py-4 text-xs text-gray-400">{item.cashier_name || 'ไม่ระบุ'}</td>
+                            <td className="px-5 py-4 text-center text-xs text-gray-300 font-medium">{item.qty} {item.unit || 'ชิ้น'}</td>
+                            <td className="px-5 py-4 text-sm font-semibold text-green-400 text-right">{fmt(item.total)}</td>
+                            <td className="px-5 py-4 text-center text-xs">
+                              <span className={`badge ${isVoid ? 'badge-red' : 'badge-green'}`}>
+                                {isVoid ? 'ยกเลิก' : 'เสร็จสิ้น'}
+                              </span>
+                            </td>
+                            <td className="px-5 py-4 text-center">
+                              {!isVoid && (
+                                <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                                  <button onClick={() => handleEditSale(item.sale_id)} style={{ padding: '6px', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 6, cursor: 'pointer', color: '#60a5fa', display: 'flex', alignItems: 'center' }} title="แก้ไขใบเสร็จ">
+                                    <Edit2 size={12} />
+                                  </button>
+                                  <button onClick={() => handleDeleteSale(item.sale_id, item.receipt_no)} style={{ padding: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', color: '#fca5a5', display: 'flex', alignItems: 'center' }} title="ลบใบเสร็จถาวร">
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
@@ -491,6 +599,210 @@ export default function ReportsPage() {
           )}
         </>
       )}
+
+      {/* Edit Sale Modal */}
+      {editingSale && (
+        <EditSaleModal
+          sale={editingSale}
+          onClose={() => setEditingSale(null)}
+          onSave={() => {
+            setEditingSale(null)
+            fetchReportData()
+          }}
+          currentUser={currentUser}
+        />
+      )}
+    </div>
+  )
+}
+
+function EditSaleModal({ sale, onClose, onSave, currentUser }: {
+  sale: any
+  onClose: () => void
+  onSave: () => void
+  currentUser: any
+}) {
+  const [saleDate, setSaleDate] = useState(
+    sale.sale_date ? sale.sale_date.substring(0, 16).replace(' ', 'T') : new Date().toISOString().substring(0, 16)
+  )
+  const [paymentMethod, setPaymentMethod] = useState(sale.payment_method || 'cash')
+  const [note, setNote] = useState(sale.note || '')
+  const [items, setItems] = useState<any[]>(sale.items || [])
+  const [discountAmount, setDiscountAmount] = useState(sale.discount_amount || 0)
+  const [submitting, setSubmitting] = useState(false)
+
+  // Real-time calculation of subtotal and total
+  const getSubtotal = () => items.reduce((sum, item) => sum + (item.qty * item.unit_price), 0)
+  const getTotal = () => Math.max(getSubtotal() - discountAmount, 0)
+
+  const handleQtyChange = (idx: number, qty: number) => {
+    const updated = [...items]
+    updated[idx] = {
+      ...updated[idx],
+      qty: Math.max(qty, 0.01),
+      total: Math.max(qty, 0.01) * updated[idx].unit_price
+    }
+    setItems(updated)
+  }
+
+  const handlePriceChange = (idx: number, price: number) => {
+    const updated = [...items]
+    updated[idx] = {
+      ...updated[idx],
+      unit_price: Math.max(price, 0),
+      total: updated[idx].qty * Math.max(price, 0)
+    }
+    setItems(updated)
+  }
+
+  const handleRemoveItem = (idx: number) => {
+    const updated = [...items]
+    updated.splice(idx, 1)
+    setItems(updated)
+  }
+
+  const handleSave = async () => {
+    if (items.length === 0) {
+      toast.error('กรุณาเหลือสินค้าอย่างน้อย 1 รายการในใบเสร็จ')
+      return
+    }
+    setSubmitting(true)
+    try {
+      const subtotal = getSubtotal()
+      const total = getTotal()
+      const payload = {
+        subtotal,
+        discount_amount: discountAmount,
+        total,
+        paid_amount: total,
+        change_amount: 0,
+        payment_method: paymentMethod,
+        note,
+        sale_date: saleDate.replace('T', ' ') + ':00',
+        customer_id: sale.customer_id,
+        items: items.map(item => ({
+          product_id: item.product_id,
+          variant_id: item.variant_id,
+          product_name: item.product_name,
+          barcode: item.barcode,
+          qty: item.qty,
+          unit: item.unit,
+          cost_price: item.cost_price,
+          unit_price: item.unit_price,
+          discount_amount: 0,
+          discount_percent: 0,
+          total: item.total
+        }))
+      }
+
+      const res = await api.sales.updateSale(sale.id, payload, currentUser?.id)
+      if (res.success) {
+        toast.success('แก้ไขใบเสร็จเรียบร้อยแล้ว')
+        onSave()
+      } else {
+        toast.error(res.error || 'แก้ไขใบเสร็จล้มเหลว')
+      }
+    } catch (e) {
+      toast.error('เกิดข้อผิดพลาด: ' + String(e))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const fmt = (n: number) => `฿${(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })}`
+
+  return (
+    <div className="modal-overlay" style={{ zIndex: 1000 }}>
+      <div className="modal-content animate-scale-up" style={{ width: 680, padding: 0, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'rgba(255,255,255,0.9)' }}>
+            ⚙️ แก้ไขใบเสร็จ #{sale.receipt_no}
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.4)', fontSize: 18 }}>✕</button>
+        </div>
+        <div style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, flex: 1 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>วันที่และเวลาขาย (Local Time)</label>
+              <input type="datetime-local" className="glass-input" value={saleDate} onChange={e => setSaleDate(e.target.value)} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>วิธีชำระเงิน</label>
+              <select className="glass-input" value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} style={{ background: '#0a0a0f', color: '#fff' }}>
+                <option value="cash">เงินสด (Cash)</option>
+                <option value="card">บัตรเครดิต (Credit Card)</option>
+                <option value="transfer">โอนเงิน (Bank Transfer)</option>
+                <option value="qr">QR PromptPay</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>หมายเหตุ</label>
+            <input type="text" className="glass-input" value={note} onChange={e => setNote(e.target.value)} placeholder="ไม่มีหมายเหตุ" />
+          </div>
+
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.8)', marginBottom: 8 }}>รายการสินค้าในบิล</div>
+            <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.4)' }}>
+                    <th style={{ padding: '8px 12px', textAlign: 'left' }}>ชื่อสินค้า</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'center', width: 90 }}>จำนวน</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'right', width: 100 }}>ราคาต่อชิ้น</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'right', width: 100 }}>รวม</th>
+                    <th style={{ padding: '8px 12px', width: 40 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                      <td style={{ padding: '8px 12px', color: '#fff' }}>
+                        {item.product_name}
+                        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>SKU: {item.sku || 'ไม่มี'}</div>
+                      </td>
+                      <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                        <input type="number" step="any" className="glass-input" style={{ width: 70, padding: '4px', textAlign: 'center', fontSize: 12 }} value={item.qty} onChange={e => handleQtyChange(idx, parseFloat(e.target.value) || 0)} />
+                      </td>
+                      <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                        <input type="number" step="any" className="glass-input" style={{ width: 90, padding: '4px', textAlign: 'right', fontSize: 12 }} value={item.unit_price} onChange={e => handlePriceChange(idx, parseFloat(e.target.value) || 0)} />
+                      </td>
+                      <td style={{ padding: '8px 12px', textAlign: 'right', color: '#4ade80' }}>
+                        {fmt(item.qty * item.unit_price)}
+                      </td>
+                      <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                        <button onClick={() => handleRemoveItem(idx)} style={{ background: 'none', border: 'none', color: '#fca5a5', cursor: 'pointer', padding: 0 }}>✕</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
+              <span>ยอดรวมสินค้า</span>
+              <span>{fmt(getSubtotal())}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, alignItems: 'center' }}>
+              <span style={{ color: 'rgba(255,255,255,0.4)' }}>ส่วนลดใบเสร็จ (฿)</span>
+              <input type="number" className="glass-input" style={{ width: 100, padding: '2px 8px', fontSize: 12, textAlign: 'right' }} value={discountAmount} onChange={e => setDiscountAmount(Math.max(parseFloat(e.target.value) || 0, 0))} />
+            </div>
+            <div style={{ borderTop: '1px dashed rgba(255,255,255,0.08)', margin: '4px 0' }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 700, color: '#22c55e' }}>
+              <span>ยอดสุทธิรวมใหม่</span>
+              <span>{fmt(getTotal())}</span>
+            </div>
+          </div>
+        </div>
+        <div style={{ padding: '16px 20px', borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button disabled={submitting} onClick={onClose} className="glass-btn btn-secondary" style={{ fontSize: 13 }}>ยกเลิก</button>
+          <button disabled={submitting} onClick={handleSave} className="glass-btn btn-primary" style={{ fontSize: 13, fontWeight: 700 }}>
+            {submitting ? 'กำลังบันทึก...' : 'บันทึกการแก้ไขบิล'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

@@ -423,12 +423,17 @@ app.whenReady().then(() => {
       const imagesDir = path.join(app.getPath('userData'), 'images')
       const absolutePath = path.isAbsolute(decodedPath) ? decodedPath : path.join(imagesDir, decodedPath)
 
-      // Safety check to ensure we only read from images folder
-      if (!absolutePath.startsWith(imagesDir)) {
+      // Safety check to ensure we only read from images folder (case-insensitive normalized check on Windows)
+      const normalizedImagesDir = path.resolve(imagesDir).toLowerCase()
+      const normalizedAbsolutePath = path.resolve(absolutePath).toLowerCase()
+
+      if (!normalizedAbsolutePath.startsWith(normalizedImagesDir)) {
         return new Response('Access Denied', { status: 403 })
       }
 
-      return net.fetch(`file:///${absolutePath}`)
+      // Convert absolute file path to a valid file:// URL across platforms (handles drive letters and special characters)
+      const { pathToFileURL } = require('url')
+      return net.fetch(pathToFileURL(absolutePath).toString())
     } catch (error) {
       return new Response(String(error), { status: 500 })
     }

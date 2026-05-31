@@ -72,8 +72,8 @@ export default function ProductsPage() {
         </div>
         {isAdmin && (
           <>
-            <button className="glass-btn btn-secondary" style={{ padding: '8px 14px', fontSize: 13 }}><Download size={14} />ส่งออก</button>
-            <button className="glass-btn btn-secondary" style={{ padding: '8px 14px', fontSize: 13 }}><Upload size={14} />นำเข้า</button>
+            <button className="glass-btn btn-secondary" style={{ padding: '8px 14px', fontSize: 13 }}><Upload size={14} />ส่งออก</button>
+            <button className="glass-btn btn-secondary" style={{ padding: '8px 14px', fontSize: 13 }}><Download size={14} />นำเข้า</button>
             <button onClick={() => { setEditing(null); setShowModal(true) }} className="glass-btn btn-primary" style={{ padding: '8px 16px', fontSize: 13, fontWeight: 700 }}>
               <Plus size={15} />เพิ่มสินค้า
             </button>
@@ -169,7 +169,7 @@ export default function ProductsPage() {
                     </td>
                     <td>
                       <span className={`badge ${p.is_active ? 'badge-green' : 'badge-red'}`}>
-                        {p.is_active ? 'ใช้งาน' : 'ระงับ'}
+                        {p.is_active ? 'ใช้งาน' : 'ปิดใช้งาน'}
                       </span>
                     </td>
                     <td>
@@ -267,6 +267,8 @@ function ProductModal({ product, categories, onClose, onSave }: {
   })
   
   const [isDragActive, setIsDragActive] = useState(false)
+  const [isCustomCategory, setIsCustomCategory] = useState(false)
+  const [customCategoryName, setCustomCategoryName] = useState('')
 
   const set = (k: string, v: unknown) => setForm(f => ({ ...f, [k]: v }))
 
@@ -288,7 +290,7 @@ function ProductModal({ product, categories, onClose, onSave }: {
         const uploadRes = await api.images.upload(filePath)
         if (uploadRes.success && uploadRes.data) {
           set('image_path', uploadRes.data)
-          set('image_path_preview', URL.createObjectURL(file))
+          set('image_path_preview', `local-img://${uploadRes.data}`)
           toast.success('อัปโหลดและเตรียมไฟล์รูปภาพเรียบร้อยแล้ว')
         } else {
           throw new Error(uploadRes.error || 'ย้ายไฟล์ไม่สำเร็จ')
@@ -397,11 +399,25 @@ function ProductModal({ product, categories, onClose, onSave }: {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <FormRow label="หมวดหมู่">
-              <select className="glass-input" value={form.category_id} onChange={e => set('category_id', parseInt(e.target.value))}
-                style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.8)' }}>
-                <option value="">เลือกหมวดหมู่</option>
-                {categories.map(c => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
-              </select>
+              {!isCustomCategory ? (
+                <select className="glass-input" value={form.category_id} onChange={e => {
+                  if (e.target.value === 'custom') {
+                    setIsCustomCategory(true)
+                  } else {
+                    set('category_id', parseInt(e.target.value) || '')
+                  }
+                }}
+                  style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.8)' }}>
+                  <option value="">เลือกหมวดหมู่</option>
+                  {categories.map(c => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+                  <option value="custom">➕ กำหนดหมวดหมู่เอง (พิมพ์ใหม่)...</option>
+                </select>
+              ) : (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input className="glass-input" value={customCategoryName} onChange={e => setCustomCategoryName(e.target.value)} placeholder="พิมพ์หมวดหมู่ใหม่..." autoFocus />
+                  <button type="button" onClick={() => { setIsCustomCategory(false); setCustomCategoryName(''); set('category_id', product?.category_id || '') }} className="glass-btn btn-secondary text-xs" style={{ padding: '0 12px' }}>ย้อนกลับ</button>
+                </div>
+              )}
             </FormRow>
             <FormRow label="หน่วย">
               <input className="glass-input" value={form.unit} onChange={e => set('unit', e.target.value)} placeholder="ชิ้น, แก้ว, ตัว..." />
@@ -432,13 +448,34 @@ function ProductModal({ product, categories, onClose, onSave }: {
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>
               <input type="checkbox" checked={!!form.is_active} onChange={e => set('is_active', e.target.checked ? 1 : 0)} />
-              เปิดใช้งาน
+              สถานะ: {form.is_active ? 'ใช้งาน' : 'ปิดใช้งาน'}
             </label>
           </div>
         </div>
         <div style={{ padding: '0 20px 20px', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button onClick={onClose} className="glass-btn btn-secondary" style={{ fontSize: 13 }}>ยกเลิก</button>
-          <button onClick={() => onSave(form as unknown as Record<string, unknown>)} className="glass-btn btn-primary" style={{ fontSize: 13, fontWeight: 700 }}>
+          <button onClick={async () => {
+            let categoryId = form.category_id
+            if (isCustomCategory && customCategoryName.trim()) {
+              const name = customCategoryName.trim()
+              const existing = categories.find(c => c.name.toLowerCase() === name.toLowerCase())
+              if (existing) {
+                categoryId = existing.id
+              } else if (api) {
+                const res = await api.categories.create({
+                  name: name,
+                  icon: '📦',
+                  color: '#22c55e',
+                  sort_order: categories.length + 1
+                })
+                if (res.success && res.data) {
+                  categoryId = res.data.id
+                }
+              }
+            }
+            const { image_path_preview, ...cleanForm } = form
+            onSave({ ...cleanForm, category_id: categoryId || null })
+          }} className="glass-btn btn-primary" style={{ fontSize: 13, fontWeight: 700 }}>
             {product ? 'บันทึก' : 'เพิ่มสินค้า'}
           </button>
         </div>
