@@ -614,4 +614,15 @@ body {
   .toggle input:checked ~ .toggle-thumb {
     transform: translateX(20px);
   }
+
+  /* Force select options to render black text on white background (resolves Windows Chromium/Electron contrast override bugs) */
+  select option,
+  select.glass-input option,
+  .glass-input option,
+  option {
+    color: #1a1b20 !important;
+    background-color: #ffffff !important;
+    background: #ffffff !important;
+  }
 }
+

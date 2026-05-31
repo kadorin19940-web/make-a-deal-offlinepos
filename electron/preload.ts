@@ -6,9 +6,9 @@ const api = {
   products: {
     getAll: (filters?: Record<string, unknown>) => ipcRenderer.invoke('products:getAll', filters),
     getById: (id: number) => ipcRenderer.invoke('products:getById', id),
-    create: (data: Record<string, unknown>) => ipcRenderer.invoke('products:create', data),
-    update: (id: number, data: Record<string, unknown>) => ipcRenderer.invoke('products:update', id, data),
-    delete: (id: number) => ipcRenderer.invoke('products:delete', id),
+    create: (data: Record<string, unknown>, userId?: number) => ipcRenderer.invoke('products:create', data, userId),
+    update: (id: number, data: Record<string, unknown>, userId?: number) => ipcRenderer.invoke('products:update', id, data, userId),
+    delete: (id: number, userId?: number) => ipcRenderer.invoke('products:delete', id, userId),
     search: (query: string) => ipcRenderer.invoke('products:search', query),
     importCSV: (data: Record<string, unknown>[]) => ipcRenderer.invoke('products:importCSV', data),
     exportCSV: () => ipcRenderer.invoke('products:exportCSV'),

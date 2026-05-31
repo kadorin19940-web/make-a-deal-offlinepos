@@ -6,9 +6,10 @@ import {
   Eye, EyeOff, Key, Lock
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
-import toast from 'react-hot-toast'
 import { useSettingsStore, useAuthStore } from '../../store'
 import type { User as UserType } from '../../types'
+import { format } from 'date-fns'
+import toast from 'react-hot-toast'
 import buildConfig from '../../../public/build-config.json'
 
 const api = (window as any).api
@@ -558,29 +559,235 @@ export default function SettingsPage() {
 
           {/* ---- Receipt ---- */}
           {activeTab === 'receipt' && (
-            <Section title="ใบเสร็จ และเครื่องพิมพ์" desc="ตั้งค่าการพิมพ์ใบเสร็จ">
-              <SettingRow label="พิมพ์ใบเสร็จอัตโนมัติ">
-                <Toggle checked={local.auto_print === 'true'} onChange={v => setField('auto_print', v ? 'true' : 'false')} />
-                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>เมื่อเปิดใช้งาน เครื่องพิมพ์จะพิมพ์ใบเสร็จโดยอัตโนมัติทันทีที่ชำระเงินเสร็จสิ้น</p>
-              </SettingRow>
-              <SettingRow label="ขนาดกระดาษ">
-                <select className="glass-input" value={local.printer_size || '80mm'} onChange={e => setField('printer_size', e.target.value)} style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.8)', maxWidth: 160 }}>
-                  <option value="58mm">58mm (Thermal)</option>
-                  <option value="80mm">80mm (Thermal)</option>
-                  <option value="A4">A4</option>
-                  <option value="A5">A5</option>
-                </select>
-                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>ขนาดของม้วนกระดาษของเครื่องพิมพ์ใบเสร็จความร้อน หรือแบบรายงานปกติที่ใช้งาน</p>
-              </SettingRow>
-              <SettingRow label="ข้อความส่วนหัวใบเสร็จ">
-                <input className="glass-input" value={local.receipt_header || ''} onChange={e => setField('receipt_header', e.target.value)} placeholder="ขอบคุณที่ใช้บริการ" />
-                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>ข้อความต้อนรับหรือรายละเอียดเพิ่มเติมที่ต้องการพิมพ์แสดงไว้ส่วนหัวของใบเสร็จ</p>
-              </SettingRow>
-              <SettingRow label="ข้อความส่วนท้ายใบเสร็จ">
-                <input className="glass-input" value={local.receipt_footer || ''} onChange={e => setField('receipt_footer', e.target.value)} placeholder="กรุณาเก็บใบเสร็จไว้" />
-                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>ข้อความขอบคุณหรือเงื่อนไขการรับเปลี่ยนคืนสินค้าที่จะพิมพ์ไว้ด้านล่างสุดของใบเสร็จ</p>
-              </SettingRow>
-            </Section>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 28, alignItems: 'start' }}>
+              {/* Left Column: Settings Form */}
+              <Section title="ใบเสร็จ และเครื่องพิมพ์" desc="ตั้งค่าการพิมพ์ใบเสร็จ">
+                <SettingRow label="พิมพ์ใบเสร็จอัตโนมัติ">
+                  <Toggle checked={local.auto_print === 'true'} onChange={v => setField('auto_print', v ? 'true' : 'false')} />
+                  <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>เมื่อเปิดใช้งาน เครื่องพิมพ์จะพิมพ์ใบเสร็จโดยอัตโนมัติทันทีที่ชำระเงินเสร็จสิ้น</p>
+                </SettingRow>
+                <SettingRow label="ขนาดกระดาษ">
+                  <select className="glass-input" value={local.printer_size || '80mm'} onChange={e => setField('printer_size', e.target.value)} style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.8)', maxWidth: 160 }}>
+                    <option value="58mm" style={{ color: '#1a1b20', background: '#ffffff' }}>58mm (Thermal)</option>
+                    <option value="80mm" style={{ color: '#1a1b20', background: '#ffffff' }}>80mm (Thermal)</option>
+                    <option value="A4" style={{ color: '#1a1b20', background: '#ffffff' }}>A4</option>
+                    <option value="A5" style={{ color: '#1a1b20', background: '#ffffff' }}>A5</option>
+                  </select>
+                  <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>ขนาดของม้วนกระดาษของเครื่องพิมพ์ใบเสร็จความร้อน หรือแบบรายงานปกติที่ใช้งาน</p>
+                </SettingRow>
+                <SettingRow label="ข้อความส่วนหัวใบเสร็จ">
+                  <input className="glass-input" value={local.receipt_header || ''} onChange={e => setField('receipt_header', e.target.value)} placeholder="ขอบคุณที่ใช้บริการ" />
+                  <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>ข้อความต้อนรับหรือรายละเอียดเพิ่มเติมที่ต้องการพิมพ์แสดงไว้ส่วนหัวของใบเสร็จ</p>
+                </SettingRow>
+                <SettingRow label="ข้อความส่วนท้ายใบเสร็จ">
+                  <input className="glass-input" value={local.receipt_footer || ''} onChange={e => setField('receipt_footer', e.target.value)} placeholder="กรุณาเก็บใบเสร็จไว้" />
+                  <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>ข้อความขอบคุณหรือเงื่อนไขการรับเปลี่ยนคืนสินค้าที่จะพิมพ์ไว้ด้านล่างสุดของใบเสร็จ</p>
+                </SettingRow>
+              </Section>
+
+              {/* Right Column: Real-Time Thermal Receipt Preview */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.45)', textTransform: 'uppercase', letterSpacing: 1 }}>ตัวอย่างใบเสร็จจริง (Real-Time)</span>
+                
+                <div style={{
+                  background: '#f8f8fb',
+                  color: '#1a1b20',
+                  borderRadius: 8,
+                  padding: '24px 16px',
+                  boxShadow: '0 15px 35px rgba(0, 0, 0, 0.4), inset 0 3px 0 #22c55e',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  fontFamily: 'monospace',
+                  fontSize: local.printer_size === '58mm' ? 10.5 : 12,
+                  width: local.printer_size === '58mm' ? '250px' : '300px',
+                  boxSizing: 'border-box',
+                  position: 'relative',
+                  transition: 'width 0.25s ease, font-size 0.25s ease'
+                }}>
+                  {/* Paper cut jagged effect at top */}
+                  <div style={{
+                    position: 'absolute',
+                    top: -6,
+                    left: 0,
+                    right: 0,
+                    height: 6,
+                    background: 'linear-gradient(-45deg, transparent 4px, #f8f8fb 0), linear-gradient(45deg, transparent 4px, #f8f8fb 0)',
+                    backgroundSize: '8px 8px',
+                    backgroundPosition: 'left top'
+                  }} />
+
+                  {/* Receipt Header info */}
+                  <div style={{ textAlign: 'center', marginBottom: 12 }}>
+                    <div style={{ fontSize: 15, fontWeight: 'bold', marginBottom: 4, letterSpacing: 0.5 }}>
+                      {local.shop_name || 'MAKE A DEAL STORE'}
+                    </div>
+                    {local.shop_name_en && (
+                      <div style={{ fontSize: 9, color: 'rgba(0,0,0,0.6)', textTransform: 'uppercase', marginBottom: 4 }}>
+                        {local.shop_name_en}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 9, color: 'rgba(0,0,0,0.7)', lineHeight: 1.3, marginBottom: 2 }}>
+                      {local.shop_address || '123 ถนนสุขุมวิท แขวงคลองเตย เขตคลองเตย กรุงเทพมหานคร 10110'}
+                    </div>
+                    {local.shop_phone && (
+                      <div style={{ fontSize: 9, color: 'rgba(0,0,0,0.7)', marginBottom: 2 }}>
+                        โทร: {local.shop_phone}
+                      </div>
+                    )}
+                    {local.shop_tax_id && (
+                      <div style={{ fontSize: 9, color: 'rgba(0,0,0,0.7)', marginBottom: 4 }}>
+                        เลขผู้เสียภาษี: {local.shop_tax_id}
+                      </div>
+                    )}
+                    
+                    {/* Real-Time User Message Header */}
+                    {local.receipt_header && (
+                      <div style={{
+                        fontSize: 9.5,
+                        fontWeight: 'bold',
+                        marginTop: 8,
+                        padding: '4px 6px',
+                        border: '1px dashed rgba(0,0,0,0.2)',
+                        background: 'rgba(0,0,0,0.02)',
+                        display: 'inline-block',
+                        borderRadius: 4
+                      }}>
+                        {local.receipt_header}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Divider */}
+                  <div style={{ borderBottom: '1px dashed rgba(0,0,0,0.3)', margin: '8px 0' }} />
+
+                  {/* Metadata */}
+                  <div style={{ fontSize: 8.5, color: 'rgba(0,0,0,0.8)', lineHeight: 1.4, marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>วันที่/เวลา:</span>
+                      <span>{format(new Date(), 'dd/MM/yyyy HH:mm')}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>เลขที่บิล:</span>
+                      <span style={{ fontWeight: 'bold' }}>INV-20260601-0001</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>แคชเชียร์:</span>
+                      <span>{currentUser?.name || 'ADMIN'}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>รูปแบบกระดาษ:</span>
+                      <span style={{ color: '#22c55e', fontWeight: 'bold' }}>{local.printer_size || '80mm'}</span>
+                    </div>
+                  </div>
+
+                  {/* Divider */}
+                  <div style={{ borderBottom: '1px dashed rgba(0,0,0,0.3)', margin: '8px 0' }} />
+
+                  {/* Items List */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, margin: '8px 0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                      <div style={{ flex: 1, paddingRight: 8 }}>
+                        <div>กาแฟอเมริกาโน่เย็น</div>
+                        <div style={{ fontSize: 8.5, color: 'rgba(0,0,0,0.6)' }}>1 x ฿85.00</div>
+                      </div>
+                      <span style={{ fontWeight: 'bold' }}>฿85.00</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                      <div style={{ flex: 1, paddingRight: 8 }}>
+                        <div>ชาเย็นสูตรดั้งเดิม</div>
+                        <div style={{ fontSize: 8.5, color: 'rgba(0,0,0,0.6)' }}>2 x ฿65.00</div>
+                      </div>
+                      <span style={{ fontWeight: 'bold' }}>฿130.00</span>
+                    </div>
+                  </div>
+
+                  {/* Divider */}
+                  <div style={{ borderBottom: '1px dashed rgba(0,0,0,0.3)', margin: '8px 0' }} />
+
+                  {/* Calculations */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 9.5, margin: '6px 0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>ยอดรวมก่อนลด:</span>
+                      <span>฿215.00</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'rgba(0,0,0,0.7)' }}>
+                      <span>ส่วนลด:</span>
+                      <span>฿0.00</span>
+                    </div>
+                    {local.vat_enabled === 'true' && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: 'rgba(0,0,0,0.7)' }}>
+                        <span>ภาษีมูลค่าเพิ่ม VAT ({local.vat_rate || '7'}%):</span>
+                        <span>฿14.07</span>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontWeight: 'bold', borderTop: '1px solid rgba(0,0,0,0.1)', paddingTop: 4 }}>
+                      <span>ยอดรวมสุทธิ (Total):</span>
+                      <span>฿215.00</span>
+                    </div>
+                  </div>
+
+                  {/* Divider */}
+                  <div style={{ borderBottom: '1px dashed rgba(0,0,0,0.3)', margin: '8px 0' }} />
+
+                  {/* Payment info */}
+                  <div style={{ fontSize: 8.5, color: 'rgba(0,0,0,0.8)', lineHeight: 1.4, margin: '6px 0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>ชำระเงินโดย:</span>
+                      <span>เงินสด (Cash)</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>รับเงินมา:</span>
+                      <span>฿500.00</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+                      <span>เงินทอน:</span>
+                      <span>฿285.00</span>
+                    </div>
+                  </div>
+
+                  {/* Divider */}
+                  <div style={{ borderBottom: '1px dashed rgba(0,0,0,0.3)', margin: '8px 0' }} />
+
+                  {/* Real-Time User Message Footer */}
+                  <div style={{ textAlign: 'center', marginTop: 10 }}>
+                    {local.receipt_footer ? (
+                      <div style={{ fontSize: 9.5, fontStyle: 'italic', color: 'rgba(0,0,0,0.8)', lineHeight: 1.4 }}>
+                        {local.receipt_footer}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 8.5, color: 'rgba(0,0,0,0.4)' }}>
+                        [ ไม่มีข้อความท้ายใบเสร็จ ]
+                      </div>
+                    )}
+
+                    {/* Simulated barcode */}
+                    <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                      <div style={{
+                        width: '80%',
+                        height: 24,
+                        background: 'repeating-linear-gradient(90deg, #1a1b20, #1a1b20 2px, transparent 2px, transparent 5px, #1a1b20 5px, #1a1b20 7px, transparent 7px, transparent 9px)'
+                      }} />
+                      <span style={{ fontSize: 6.5, color: 'rgba(0,0,0,0.5)', letterSpacing: 1.2 }}>*INV-20260601-0001*</span>
+                    </div>
+                    
+                    <div style={{ fontSize: 7.5, color: 'rgba(0,0,0,0.4)', marginTop: 8 }}>
+                      Powered by Make a Deal POS
+                    </div>
+                  </div>
+
+                  {/* Paper cut jagged effect at bottom */}
+                  <div style={{
+                    position: 'absolute',
+                    bottom: -6,
+                    left: 0,
+                    right: 0,
+                    height: 6,
+                    background: 'linear-gradient(135deg, transparent 4px, #f8f8fb 0), linear-gradient(-135deg, transparent 4px, #f8f8fb 0)',
+                    backgroundSize: '8px 8px',
+                    backgroundPosition: 'left bottom'
+                  }} />
+                </div>
+              </div>
+            </div>
           )}
 
           {/* ---- Users ---- */}

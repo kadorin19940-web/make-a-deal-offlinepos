@@ -101,6 +101,32 @@ export function registerProductHandlers(db: Database.Database) {
       if (!checkAdmin(db, userId)) {
         return { success: false, error: 'Unauthorized: Admin privileges required to create products.' }
       }
+
+      // Default values to satisfy strict SQLite named bindings
+      const defaultProduct = {
+        barcode: null,
+        sku: null,
+        name: '',
+        name_en: null,
+        description: null,
+        category_id: null,
+        unit: 'ชิ้น',
+        cost_price: 0,
+        sell_price: 0,
+        sell_price2: null,
+        sell_price3: null,
+        stock_qty: 0,
+        min_stock: 0,
+        max_stock: null,
+        image_path: null,
+        is_service: 0,
+        is_active: 1,
+        has_variants: 0,
+        tax_rate: 7
+      }
+
+      const mergedData = { ...defaultProduct, ...data }
+
       const stmt = db.prepare(`
         INSERT INTO products (barcode, sku, name, name_en, description, category_id, unit,
           cost_price, sell_price, sell_price2, sell_price3, stock_qty, min_stock, max_stock,
@@ -109,9 +135,10 @@ export function registerProductHandlers(db: Database.Database) {
           @cost_price, @sell_price, @sell_price2, @sell_price3, @stock_qty, @min_stock, @max_stock,
           @image_path, @is_service, @is_active, @has_variants, @tax_rate)
       `)
-      const result = stmt.run(data)
+      const result = stmt.run(mergedData)
       return { success: true, data: { id: result.lastInsertRowid } }
     } catch (error) {
+      console.error('products:create error:', error)
       return { success: false, error: String(error) }
     }
   })
@@ -231,15 +258,24 @@ export function registerProductHandlers(db: Database.Database) {
 
   ipcMain.handle('categories:create', (_, data: Record<string, unknown>) => {
     try {
+      const merged = {
+        name: '',
+        name_en: null,
+        color: '#22C55E',
+        icon: '📦',
+        sort_order: 0,
+        ...data
+      }
       const result = db.prepare(`
         INSERT INTO categories (name, name_en, color, icon, sort_order)
         VALUES (@name, @name_en, @color, @icon, @sort_order)
-      `).run(data)
+      `).run(merged)
       return { success: true, data: { id: result.lastInsertRowid } }
     } catch (error) {
       return { success: false, error: String(error) }
     }
   })
+
 
   ipcMain.handle('categories:update', (_, id: number, data: Record<string, unknown>) => {
     try {

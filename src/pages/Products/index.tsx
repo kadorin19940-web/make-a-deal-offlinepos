@@ -236,8 +236,16 @@ export default function ProductsPage() {
           onClose={() => setShowModal(false)}
           onSave={async (data) => {
             if (api) {
-              if (editing) await api.products.update(editing.id, data, currentUser?.id)
-              else await api.products.create(data, currentUser?.id)
+              let res
+              if (editing) {
+                res = await api.products.update(editing.id, data, currentUser?.id)
+              } else {
+                res = await api.products.create(data, currentUser?.id)
+              }
+              if (res && !res.success) {
+                toast.error(res.error || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล')
+                return
+              }
             }
             toast.success(editing ? 'แก้ไขสินค้าแล้ว' : 'เพิ่มสินค้าแล้ว')
             setShowModal(false)
@@ -258,8 +266,10 @@ function ProductModal({ product, categories, onClose, onSave }: {
   const [form, setForm] = useState({
     name: product?.name || '', barcode: product?.barcode || '', sku: product?.sku || '',
     category_id: product?.category_id || '', unit: product?.unit || 'ชิ้น',
-    cost_price: product?.cost_price || 0, sell_price: product?.sell_price || 0,
-    stock_qty: product?.stock_qty || 0, min_stock: product?.min_stock || 0,
+    cost_price: product?.cost_price !== undefined ? String(product.cost_price) : '0',
+    sell_price: product?.sell_price !== undefined ? String(product.sell_price) : '0',
+    stock_qty: product?.stock_qty !== undefined ? String(product.stock_qty) : '0',
+    min_stock: product?.min_stock !== undefined ? String(product.min_stock) : '0',
     is_service: product?.is_service || 0, is_active: product?.is_active ?? 1,
     tax_rate: product?.tax_rate || 7,
     image_path: product?.image_path || '',
@@ -408,9 +418,9 @@ function ProductModal({ product, categories, onClose, onSave }: {
                   }
                 }}
                   style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.8)' }}>
-                  <option value="">เลือกหมวดหมู่</option>
-                  {categories.map(c => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
-                  <option value="custom">➕ กำหนดหมวดหมู่เอง (พิมพ์ใหม่)...</option>
+                  <option value="" style={{ color: '#1a1b20', background: '#ffffff' }}>เลือกหมวดหมู่</option>
+                  {categories.map(c => <option key={c.id} value={c.id} style={{ color: '#1a1b20', background: '#ffffff' }}>{c.icon} {c.name}</option>)}
+                  <option value="custom" style={{ color: '#1a1b20', background: '#ffffff' }}>➕ กำหนดหมวดหมู่เอง (พิมพ์ใหม่)...</option>
                 </select>
               ) : (
                 <div style={{ display: 'flex', gap: 6 }}>
@@ -425,19 +435,19 @@ function ProductModal({ product, categories, onClose, onSave }: {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <FormRow label="ราคาขาย (฿) *">
-              <input className="glass-input" type="number" value={form.sell_price} onChange={e => set('sell_price', parseFloat(e.target.value) || 0)} />
+              <input className="glass-input" type="number" value={form.sell_price} onChange={e => set('sell_price', e.target.value)} />
             </FormRow>
             <FormRow label="ต้นทุน (฿)">
-              <input className="glass-input" type="number" value={form.cost_price} onChange={e => set('cost_price', parseFloat(e.target.value) || 0)} />
+              <input className="glass-input" type="number" value={form.cost_price} onChange={e => set('cost_price', e.target.value)} />
             </FormRow>
           </div>
           {!form.is_service && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <FormRow label="จำนวนสต็อก">
-                <input className="glass-input" type="number" value={form.stock_qty} onChange={e => set('stock_qty', parseFloat(e.target.value) || 0)} />
+                <input className="glass-input" type="number" value={form.stock_qty} onChange={e => set('stock_qty', e.target.value)} />
               </FormRow>
               <FormRow label="สต็อกขั้นต่ำ">
-                <input className="glass-input" type="number" value={form.min_stock} onChange={e => set('min_stock', parseFloat(e.target.value) || 0)} />
+                <input className="glass-input" type="number" value={form.min_stock} onChange={e => set('min_stock', e.target.value)} />
               </FormRow>
             </div>
           )}
@@ -474,7 +484,14 @@ function ProductModal({ product, categories, onClose, onSave }: {
               }
             }
             const { image_path_preview, ...cleanForm } = form
-            onSave({ ...cleanForm, category_id: categoryId || null })
+            onSave({
+              ...cleanForm,
+              category_id: categoryId || null,
+              cost_price: parseFloat(form.cost_price) || 0,
+              sell_price: parseFloat(form.sell_price) || 0,
+              stock_qty: parseFloat(form.stock_qty) || 0,
+              min_stock: parseFloat(form.min_stock) || 0,
+            })
           }} className="glass-btn btn-primary" style={{ fontSize: 13, fontWeight: 700 }}>
             {product ? 'บันทึก' : 'เพิ่มสินค้า'}
           </button>

@@ -797,7 +797,28 @@ function ProductCard({ product, onAdd, formatMoney }: {
         borderRadius: '8px 8px 0 0',
       }} />
 
-      <div style={{ fontSize: 20, marginTop: 6 }}>{product.category_icon || '📦'}</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', marginTop: 4, overflow: 'hidden' }}>
+        {product.image_path ? (
+          <img 
+            src={`local-img://${product.image_path}`} 
+            alt={product.name} 
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            onError={(e) => {
+              e.currentTarget.style.display = 'none';
+              const pNode = e.currentTarget.parentNode as HTMLElement;
+              if (pNode) {
+                const fallbackSpan = document.createElement('span');
+                fallbackSpan.innerText = product.category_icon || '📦';
+                fallbackSpan.style.fontSize = '18px';
+                pNode.appendChild(fallbackSpan);
+              }
+            }}
+          />
+        ) : (
+          <span style={{ fontSize: 18 }}>{product.category_icon || '📦'}</span>
+        )}
+      </div>
+
       <div style={{
         fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.85)',
         lineHeight: 1.3, marginTop: 2,

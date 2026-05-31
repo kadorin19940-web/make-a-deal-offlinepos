@@ -422,8 +422,26 @@ function runMigrations() {
 }
 
 function seedData() {
+  // Default categories seed (check and seed independently of user count)
+  const catCount = (db.prepare('SELECT COUNT(*) as count FROM categories').get() as { count: number }).count
+  if (catCount === 0) {
+    const defaultCategories = [
+      { name: 'อาหารและเครื่องดื่ม', icon: '🍔', color: '#F59E0B', sort_order: 1 },
+      { name: 'เครื่องใช้ไฟฟ้า', icon: '📱', color: '#3B82F6', sort_order: 2 },
+      { name: 'เครื่องแต่งกาย', icon: '👕', color: '#EC4899', sort_order: 3 },
+      { name: 'สุขภาพและความงาม', icon: '💄', color: '#8B5CF6', sort_order: 4 },
+      { name: 'บริการ', icon: '⚡', color: '#22C55E', sort_order: 5 }
+    ]
+    const insertCat = db.prepare('INSERT INTO categories (name, icon, color, sort_order) VALUES (?, ?, ?, ?)')
+    for (const cat of defaultCategories) {
+      insertCat.run(cat.name, cat.icon, cat.color, cat.sort_order)
+    }
+    console.log('[DB Seed] Default categories seeded successfully.')
+  }
+
   const userCount = (db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }).count
   if (userCount > 0) return
+
 
   // Default admin user
   const adminHash = bcrypt.hashSync('admin1234', 12)
