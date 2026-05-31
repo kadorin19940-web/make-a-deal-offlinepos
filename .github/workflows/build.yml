@@ -44,11 +44,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Bundle Installer and Guides into ZIP
+        # Combines the installer (.exe), UserLogin.txt, and คู่มือการติดตั้ง.txt into a single compressed .zip file
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-zip
+          Copy-Item -Path "release\*.exe" -Destination "dist-zip"
+          Copy-Item -Path "UserLogin.txt" -Destination "dist-zip"
+          Copy-Item -Path "คู่มือการติดตั้ง.txt" -Destination "dist-zip"
+          Compress-Archive -Path "dist-zip\*" -DestinationPath "release\Make-a-Deal-POS-Windows.zip"
+
       - name: Upload Installer Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Make-a-Deal-POS-Windows-Installer
-          path: release/*.exe
+          path: release/Make-a-Deal-POS-Windows.zip
           retention-days: 30
 
       - name: Create GitHub Release
@@ -56,7 +65,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.exe
+          files: release/Make-a-Deal-POS-Windows.zip
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

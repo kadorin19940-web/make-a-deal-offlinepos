@@ -15,6 +15,7 @@ import { registerSessionHandlers } from './ipc/sessions'
 import { registerPromotionHandlers } from './ipc/promotions'
 import { registerSupplierHandlers } from './ipc/suppliers'
 import { registerBackupHandlers } from './ipc/backup'
+import { registerLANServerHandlers } from './ipc/lanServer'
 
 // Register local-img scheme as privileged before app is ready
 protocol.registerSchemesAsPrivileged([
@@ -128,6 +129,7 @@ app.whenReady().then(() => {
   registerPromotionHandlers(db)
   registerSupplierHandlers(db)
   registerBackupHandlers(db)
+  registerLANServerHandlers(db)
 
   // Generic dialog handlers
   ipcMain.handle('dialog:openFile', async (_, filters) => {
@@ -187,6 +189,42 @@ app.whenReady().then(() => {
     } catch (error) {
       return { success: false, error: String(error) }
     }
+  })
+
+  // Silent Receipt Printer Handler using offscreen rendering
+  ipcMain.handle('print:receipt', async (_, { saleData, settings }) => {
+    return new Promise((resolve) => {
+      try {
+        const htmlContent = generateReceiptHtml(saleData, settings)
+        
+        let printWin = new BrowserWindow({
+          show: false,
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true
+          }
+        })
+        
+        printWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(htmlContent))
+        
+        printWin.webContents.once('did-finish-load', () => {
+          printWin.webContents.print({
+            silent: true,
+            printBackground: true,
+            margins: { marginType: 'none' }
+          }, (success, failureReason) => {
+            printWin.destroy() // Always clean up to prevent resource/memory leaks
+            if (success) {
+              resolve({ success: true })
+            } else {
+              resolve({ success: false, error: failureReason })
+            }
+          })
+        })
+      } catch (err) {
+        resolve({ success: false, error: String(err) })
+      }
+    })
   })
 
   // Hardware Cash Drawer Integration via SerialPort (Standard 9600 baud open/pulse/close)
@@ -410,3 +448,130 @@ app.on('window-all-closed', () => {
     app.quit()
   }
 })
+
+function generateReceiptHtml(saleData: any, settings: any): string {
+  const is80mm = settings.printer_size === '80mm'
+  const widthStyle = is80mm ? 'width: 80mm; max-width: 80mm;' : 'width: 58mm; max-width: 58mm;'
+  
+  const itemsHtml = (saleData.items || []).map((item: any) => {
+    const totalItemPrice = item.qty * item.unit_price - (item.discount_amount || 0)
+    return `
+      <tr style="font-size: 11px;">
+        <td style="padding: 3px 0; word-break: break-all;">
+          ${item.product_name}
+          ${item.discount_amount > 0 ? `<br/><span style="font-size: 9px; color: #555;">(ลด ฿${item.discount_amount.toLocaleString('th-TH')})</span>` : ''}
+        </td>
+        <td style="text-align: center; padding: 3px 0; vertical-align: top;">${item.qty}</td>
+        <td style="text-align: right; padding: 3px 0; vertical-align: top;">฿${totalItemPrice.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+      </tr>
+    `
+  }).join('')
+
+  const saleDateStr = saleData.sale_date 
+    ? new Date(saleData.sale_date).toLocaleString('th-TH') 
+    : new Date().toLocaleString('th-TH')
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Receipt</title>
+      <style>
+        @page { margin: 0; }
+        body {
+          font-family: Arial, sans-serif;
+          color: #000;
+          background: #fff;
+          margin: 0;
+          padding: 6px;
+          ${widthStyle}
+          font-size: 12px;
+          line-height: 1.3;
+        }
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .divider { border-top: 1px dashed #000; margin: 6px 0; }
+        .bold { font-weight: bold; }
+        .title { font-size: 15px; font-weight: bold; margin-bottom: 2px; }
+        .subtitle { font-size: 10px; color: #333; margin-bottom: 2px; }
+        table { width: 100%; border-collapse: collapse; }
+      </style>
+    </head>
+    <body>
+      <div class="text-center">
+        <div class="title">${settings.shop_name || 'Make a Deal'}</div>
+        ${settings.shop_name_en ? `<div style="font-size: 11px; font-weight: bold;">${settings.shop_name_en}</div>` : ''}
+        <div class="subtitle">${settings.shop_address || ''}</div>
+        <div class="subtitle">โทร: ${settings.shop_phone || ''}</div>
+        ${settings.shop_tax_id ? `<div class="subtitle">เลขประจำตัวผู้เสียภาษี: ${settings.shop_tax_id}</div>` : ''}
+      </div>
+      
+      <div class="divider"></div>
+      
+      <table style="font-size: 10px;">
+        <tr>
+          <td>เลขที่บิล: ${saleData.receipt_no}</td>
+          <td class="text-right">${saleDateStr}</td>
+        </tr>
+      </table>
+      
+      <div class="divider"></div>
+      
+      <table>
+        <thead>
+          <tr style="font-size: 10px; font-weight: bold; border-bottom: 1px dashed #000;">
+            <th style="text-align: left; padding: 2px 0;">รายการ</th>
+            <th style="text-align: center; padding: 2px 0; width: 40px;">จำนวน</th>
+            <th style="text-align: right; padding: 2px 0; width: 70px;">รวม</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsHtml}
+        </tbody>
+      </table>
+      
+      <div class="divider"></div>
+      
+      <table class="bold" style="font-size: 11px;">
+        <tr>
+          <td>ยอดรวมสุทธิ</td>
+          <td class="text-right">฿${saleData.subtotal.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</td>
+        </tr>
+        ${saleData.discount_amount > 0 ? `
+          <tr style="font-size: 10px; font-weight: normal;">
+            <td>ส่วนลดพิเศษ</td>
+            <td class="text-right">-฿${saleData.discount_amount.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</td>
+          </tr>
+        ` : ''}
+        <tr style="font-size: 12px;">
+          <td>ยอดรวมทั้งสิ้น</td>
+          <td class="text-right">฿${saleData.total.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</td>
+        </tr>
+        <tr style="font-size: 10px; font-weight: normal;">
+          <td>ชำระด้วย: ${
+            saleData.payment_method === 'cash' ? 'เงินสด' : 
+            saleData.payment_method === 'card' ? 'บัตรเครดิต' : 
+            saleData.payment_method === 'transfer' ? 'โอนเงิน' : 'QR PromptPay'
+          }</td>
+          <td class="text-right">฿${saleData.paid_amount.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</td>
+        </tr>
+        ${saleData.payment_method === 'cash' ? `
+          <tr style="font-size: 11px;">
+            <td>เงินทอน</td>
+            <td class="text-right">฿${saleData.change_amount.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</td>
+          </tr>
+        ` : ''}
+      </table>
+      
+      <div class="divider"></div>
+      
+      <div class="text-center" style="font-size: 10px;">
+        <div>${settings.receipt_header || 'ขอบคุณที่ใช้บริการ'}</div>
+        <div>${settings.receipt_footer || ''}</div>
+        <div style="font-size: 8px; color: #555; margin-top: 4px;">Powered by Make a Deal POS</div>
+      </div>
+    </body>
+    </html>
+  `
+}

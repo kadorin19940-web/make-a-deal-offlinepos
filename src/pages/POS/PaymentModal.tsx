@@ -31,18 +31,33 @@ export default function PaymentModal({
   const [receiptNo, setReceiptNo] = useState('')
   const [loading, setLoading] = useState(false)
   const [pointsToUse, setPointsToUse] = useState(0)
+  const [finalSaleData, setFinalSaleData] = useState<any>(null)
+  const [loyaltyRule, setLoyaltyRule] = useState<any>(null)
   const { settings } = useSettingsStore()
 
+  const pointsVal = pointsToUse * (loyaltyRule?.redeem_per_baht ?? 0.1)
   const cashAmount = parseFloat(cashInput) || 0
-  const change = method === 'cash' ? Math.max(cashAmount - total + pointsToUse * 0.1, 0) : 0
-  const shortfall = method === 'cash' && cashAmount > 0 ? total - pointsToUse * 0.1 - cashAmount : 0
+  const change = method === 'cash' ? Math.max(cashAmount - (total - pointsVal), 0) : 0
+  const shortfall = method === 'cash' && cashAmount > 0 ? Math.max((total - pointsVal) - cashAmount, 0) : 0
 
-  const QUICK_AMOUNTS = [total, Math.ceil(total / 100) * 100, Math.ceil(total / 500) * 500, Math.ceil(total / 1000) * 1000]
-    .filter((v, i, a) => a.indexOf(v) === i).slice(0, 4)
+  const QUICK_AMOUNTS = [total - pointsVal, Math.ceil((total - pointsVal) / 100) * 100, Math.ceil((total - pointsVal) / 500) * 500, Math.ceil((total - pointsVal) / 1000) * 1000]
+    .filter((v, i, a) => a.indexOf(v) === i && v > 0).slice(0, 4)
 
   useEffect(() => {
     generateReceipt()
+    loadLoyaltyRule()
   }, [])
+
+  const loadLoyaltyRule = async () => {
+    try {
+      if ((window as any).api?.loyalty) {
+        const res = await (window as any).api.loyalty.getRules()
+        if (res.success && res.data) setLoyaltyRule(res.data)
+      }
+    } catch (err) {
+      console.error('Failed to load loyalty rules:', err)
+    }
+  }
 
   const generateReceipt = async () => {
     if (api) {
@@ -69,6 +84,7 @@ export default function PaymentModal({
       const saleData = {
         receipt_no: receiptNo,
         customer_id: customer?.id || null,
+        customer_name: customer?.name || null,
         user_id: userId || null,
         subtotal,
         discount_amount: discountAmount,
@@ -80,7 +96,7 @@ export default function PaymentModal({
         payment_method: method,
         payment_details: reference ? JSON.stringify({ reference }) : null,
         coupon_code: couponCode || null,
-        points_earned: customer ? Math.floor(total / 1) : 0,
+        points_earned: customer ? Math.floor(total * (loyaltyRule?.earn_per_baht ?? 1)) : 0,
         points_used: pointsToUse,
         items: items.map(item => ({
           product_id: item.product_id,
@@ -101,9 +117,28 @@ export default function PaymentModal({
       if (api) {
         const res = await api.sales.create(saleData)
         if (!res.success) { toast.error(res.error || 'เกิดข้อผิดพลาด'); return }
+        
+        // Silent Background Google Sheets Sync
+        if (api.backup) {
+          api.backup.syncGoogleSheets().catch((err: any) => {
+            console.error('[Background Sync] Google Sheets sync failed:', err)
+          })
+        }
       }
 
+      setFinalSaleData(saleData)
       setStep('done')
+
+      // Auto print if enabled in settings
+      if (api && api.print && settings.auto_print === 'true') {
+        api.print.receipt(saleData, settings).then((printRes: any) => {
+          if (printRes.success) {
+            toast.success('พิมพ์ใบเสร็จอัตโนมัติสำเร็จ')
+          } else {
+            console.error('Auto-print failed:', printRes.error)
+          }
+        }).catch((err: any) => console.error('Auto-print error:', err))
+      }
     } catch {
       toast.error('เกิดข้อผิดพลาด')
     } finally {
@@ -155,7 +190,26 @@ export default function PaymentModal({
 
             <div style={{ display: 'flex', gap: 10 }}>
               <button
-                onClick={() => { toast('กำลังพิมพ์ใบเสร็จ...'); setTimeout(onSuccess, 500) }}
+                onClick={async () => {
+                  if (api && api.print && finalSaleData) {
+                    const printToast = toast.loading('กำลังพิมพ์ใบเสร็จ...')
+                    try {
+                      const printRes = await api.print.receipt(finalSaleData, settings)
+                      toast.dismiss(printToast)
+                      if (printRes.success) {
+                        toast.success('พิมพ์ใบเสร็จสำเร็จ')
+                      } else {
+                        toast.error('พิมพ์ล้มเหลว: ' + (printRes.error || 'ไม่พบเครื่องพิมพ์'))
+                      }
+                    } catch (err) {
+                      toast.dismiss(printToast)
+                      toast.error('เกิดข้อผิดพลาดในการพิมพ์')
+                    }
+                  } else {
+                    toast.success('กำลังจำลองการพิมพ์ใบเสร็จ (Demo)')
+                  }
+                  setTimeout(onSuccess, 800)
+                }}
                 className="glass-btn btn-secondary"
                 style={{ flex: 1, fontSize: 14 }}
               >
@@ -366,7 +420,7 @@ export default function PaymentModal({
               })()}
 
               {/* Loyalty points */}
-              {customer && customer.points >= 100 && (
+              {customer && customer.points >= (loyaltyRule?.min_redeem ?? 100) && (
                 <div style={{
                   marginTop: 12, padding: '10px 14px',
                   background: 'rgba(252,211,77,0.08)', border: '1px solid rgba(252,211,77,0.2)',
@@ -375,11 +429,11 @@ export default function PaymentModal({
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 12, color: '#fcd34d', fontWeight: 600 }}>ใช้แต้มสะสม</div>
                     <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>
-                      {customer.points.toLocaleString()} แต้ม = ฿{(customer.points * 0.1).toLocaleString()}
+                      {customer.points.toLocaleString()} แต้ม = ฿{(customer.points * (loyaltyRule?.redeem_per_baht ?? 0.1)).toLocaleString('th-TH', { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                   <input
-                    type="number" min="0" max={Math.min(customer.points, Math.floor(total / 0.1))}
+                    type="number" min="0" max={Math.min(customer.points, Math.floor(total / (loyaltyRule?.redeem_per_baht ?? 0.1)))}
                     value={pointsToUse || ''}
                     onChange={e => setPointsToUse(Math.min(parseInt(e.target.value) || 0, customer.points))}
                     placeholder="0"
@@ -398,7 +452,7 @@ export default function PaymentModal({
             <div style={{ padding: '0 20px 20px' }}>
               <button
                 onClick={handlePay}
-                disabled={loading || (method === 'cash' && cashAmount < total - pointsToUse * 0.1 && cashInput !== '')}
+                disabled={loading || (method === 'cash' && cashAmount < total - pointsVal && cashInput !== '')}
                 className="glass-btn btn-primary"
                 style={{ 
                   width: '100%', 
@@ -410,7 +464,7 @@ export default function PaymentModal({
                   transition: 'all 0.2s'
                 }}
               >
-                {loading ? 'กำลังบันทึก...' : `ยืนยันการชำระ ${fmt(total)}`}
+                {loading ? 'กำลังบันทึก...' : `ยืนยันการชำระ ${fmt(total - pointsVal)}`}
               </button>
             </div>
           </>

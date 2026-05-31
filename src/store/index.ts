@@ -69,6 +69,7 @@ interface CartState {
   discount: number
   discountType: 'amount' | 'percent'
   coupon: Promotion | null
+  promotionsList: Promotion[]
   note: string
   addItem: (item: CartItem) => void
   updateItem: (index: number, updates: Partial<CartItem>) => void
@@ -77,6 +78,7 @@ interface CartState {
   setCustomer: (customer: Customer | null) => void
   setDiscount: (amount: number, type: 'amount' | 'percent') => void
   setCoupon: (coupon: Promotion | null) => void
+  setPromotionsList: (promotions: Promotion[]) => void
   setNote: (note: string) => void
   getSubtotal: () => number
   getDiscountAmount: () => number
@@ -89,6 +91,7 @@ export const useCartStore = create<CartState>((set, get) => ({
   discount: 0,
   discountType: 'amount',
   coupon: null,
+  promotionsList: [],
   note: '',
 
   addItem: (item) => {
@@ -128,21 +131,90 @@ export const useCartStore = create<CartState>((set, get) => ({
 
   clearCart: () => set({
     items: [], customer: null, discount: 0, discountType: 'amount',
-    coupon: null, note: ''
+    coupon: null, promotionsList: [], note: ''
   }),
 
   setCustomer: (customer) => set({ customer }),
   setDiscount: (discount, discountType) => set({ discount, discountType }),
   setCoupon: (coupon) => set({ coupon }),
+  setPromotionsList: (promotionsList) => set({ promotionsList }),
   setNote: (note) => set({ note }),
 
   getSubtotal: () => get().items.reduce((sum, item) => sum + item.total, 0),
 
   getDiscountAmount: () => {
-    const { discount, discountType, coupon } = get()
+    const { discount, discountType, coupon, promotionsList, items } = get()
     const subtotal = get().getSubtotal()
+    
+    // 1. Manual Discount (Inputted by Cashier)
     let discountAmt = discountType === 'percent' ? subtotal * (discount / 100) : discount
-    if (coupon?.calculated_discount) discountAmt += coupon.calculated_discount
+    
+    // 2. Manual Coupon Discount (Validated Coupon)
+    if (coupon?.calculated_discount) {
+      discountAmt += coupon.calculated_discount
+    }
+
+    // 3. Automatic Promotions Engine (Auto-applying discounts)
+    let autoDiscountAmt = 0
+    if (promotionsList && promotionsList.length > 0 && items.length > 0) {
+      const now = new Date()
+      // Filter active, automatic promotions (where code is null, empty, or starts with 'AUTO_')
+      const autoPromos = promotionsList.filter(p =>
+        p.is_active === 1 &&
+        (!p.code || p.code.trim() === '' || p.code.startsWith('AUTO_')) &&
+        (!p.start_date || new Date(p.start_date) <= now) &&
+        (!p.end_date || new Date(p.end_date) >= now) &&
+        (!p.usage_limit || p.usage_count < p.usage_limit)
+      )
+
+      for (const promo of autoPromos) {
+        if (promo.min_purchase && subtotal < promo.min_purchase) continue
+
+        let promoDiscount = 0
+        if (promo.apply_to === 'all') {
+          if (promo.type === 'percent_off') {
+            promoDiscount = subtotal * (promo.discount_value / 100)
+          } else if (promo.type === 'amount_off') {
+            promoDiscount = promo.discount_value
+          }
+        } else {
+          // Specific categories or products
+          let targetIds: number[] = []
+          try {
+            targetIds = JSON.parse(promo.apply_ids || '[]')
+          } catch {
+            targetIds = String(promo.apply_ids).split(',').map(Number).filter(n => !isNaN(n))
+          }
+
+          if (targetIds.length > 0) {
+            const matchingItems = items.filter(item => {
+              if (promo.apply_to === 'product') {
+                return targetIds.includes(item.product_id ?? 0)
+              } else if (promo.apply_to === 'category') {
+                return targetIds.includes(item.product?.category_id ?? 0)
+              }
+              return false
+            })
+
+            const matchingSubtotal = matchingItems.reduce((sum, item) => sum + (item.qty * item.unit_price), 0)
+            if (matchingSubtotal > 0) {
+              if (promo.type === 'percent_off') {
+                promoDiscount = matchingSubtotal * (promo.discount_value / 100)
+              } else if (promo.type === 'amount_off') {
+                promoDiscount = promo.discount_value
+              }
+            }
+          }
+        }
+
+        if (promo.max_discount && promoDiscount > promo.max_discount) {
+          promoDiscount = promo.max_discount
+        }
+        autoDiscountAmt += promoDiscount
+      }
+    }
+
+    discountAmt += autoDiscountAmt
     return Math.min(discountAmt, subtotal)
   },
 

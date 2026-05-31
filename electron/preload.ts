@@ -135,6 +135,7 @@ const api = {
     setAutoBackup: (config: Record<string, unknown>) => ipcRenderer.invoke('backup:setAutoBackup', config),
     triggerSilentBackup: () => ipcRenderer.invoke('backup:silent-trigger'),
     exportCustom: (targetDir: string) => ipcRenderer.invoke('backup:export-custom', targetDir),
+    syncGoogleSheets: () => ipcRenderer.invoke('backup:sync-google-sheets'),
   },
 
   // Dialog
@@ -171,6 +172,12 @@ const api = {
     openDrawer: (comPort: string) => ipcRenderer.invoke('hardware:open-drawer', comPort),
   },
 
+  // Printing
+  print: {
+    receipt: (saleData: Record<string, unknown>, settings: Record<string, unknown>) =>
+      ipcRenderer.invoke('print:receipt', { saleData, settings }),
+  },
+
   // License Activation System
   system: {
     getHardwareId: () => ipcRenderer.invoke('system:get-hardware-id'),
@@ -178,6 +185,14 @@ const api = {
     activateLicense: (licenseKey: string, email: string, hardwareId: string) =>
       ipcRenderer.invoke('system:activate-license', { licenseKey, email, hardwareId }),
     deactivateLicense: () => ipcRenderer.invoke('system:deactivate-license'),
+  },
+
+  // Local LAN Server System
+  lanServer: {
+    start: (port: number) => ipcRenderer.invoke('lan-server:start', port),
+    stop: () => ipcRenderer.invoke('lan-server:stop'),
+    getStatus: () => ipcRenderer.invoke('lan-server:status'),
+    getLocalIPs: () => ipcRenderer.invoke('lan-server:get-ips'),
   },
 }
 

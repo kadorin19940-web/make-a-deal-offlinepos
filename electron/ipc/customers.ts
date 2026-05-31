@@ -929,4 +929,82 @@ export function registerBackupHandlers(db: Database.Database) {
       return { success: false, error: String(error) }
     }
   })
+
+  ipcMain.handle('backup:sync-google-sheets', async () => {
+    try {
+      const urlRow = db.prepare("SELECT value FROM shop_settings WHERE key = 'google_sheet_url'").get() as { value: string } | undefined
+      const googleSheetUrl = urlRow ? urlRow.value : ''
+      if (!googleSheetUrl) {
+        return { success: false, error: 'กรุณากรอกลิงก์ Google Sheets Web App ในการตั้งค่าก่อนทำการซิงก์ข้อมูล' }
+      }
+      if (!googleSheetUrl.startsWith('https://script.google.com/macros/s/')) {
+        return { 
+          success: false, 
+          error: 'กรุณาใช้ลิงก์ Web App จาก Google Apps Script ที่สร้างตามคู่มือแนะนำ (ลิงก์ต้องขึ้นต้นด้วย https://script.google.com/macros/s/)' 
+        }
+      }
+
+      // Query all unsynced sales where is_synced = 0 or is_synced IS NULL
+      const sales = db.prepare("SELECT * FROM sales WHERE is_synced = 0 OR is_synced IS NULL LIMIT 100").all() as any[]
+      if (sales.length === 0) {
+        return { success: true, count: 0, message: 'ไม่มีข้อมูลยอดขายใหม่ที่ต้องซิงก์' }
+      }
+
+      const syncedSales: any[] = []
+      for (const sale of sales) {
+        let customerName = 'ลูกค้าทั่วไป'
+        if (sale.customer_id) {
+          const cust = db.prepare("SELECT name FROM customers WHERE id = ?").get(sale.customer_id) as { name: string } | undefined
+          if (cust) customerName = cust.name
+        }
+
+        const items = db.prepare("SELECT * FROM sale_items WHERE sale_id = ?").all(sale.id) as any[]
+        const itemsSummary = items.map(it => `${it.product_name} x${it.qty}`).join(', ')
+
+        syncedSales.push({
+          receipt_no: sale.receipt_no,
+          sale_date: sale.sale_date,
+          customer_name: customerName,
+          subtotal: sale.subtotal,
+          discount_amount: sale.discount_amount,
+          tax_amount: sale.tax_amount,
+          total: sale.total,
+          payment_method: sale.payment_method,
+          status: sale.status,
+          points_earned: sale.points_earned,
+          items_summary: itemsSummary
+        })
+      }
+
+      const response = await fetch(googleSheetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'sync_sales',
+          sales: syncedSales
+        }),
+        redirect: 'follow'
+      })
+
+      if (!response.ok) {
+        return { success: false, error: `Google Sheets Apps Script Respond Error: HTTP ${response.status}` }
+      }
+
+      const result = await response.json() as { success: boolean; error?: string }
+      if (result && result.success) {
+        const updateStmt = db.prepare("UPDATE sales SET is_synced = 1 WHERE id = ?")
+        const transaction = db.transaction((salesToUpdate: any[]) => {
+          for (const s of salesToUpdate) {
+            updateStmt.run(s.id)
+          }
+        })
+        transaction(sales)
+        return { success: true, count: sales.length }
+      } else {
+        return { success: false, error: result.error || 'ระบบเซิร์ฟเวอร์ Google Apps Script ตอบกลับว่าไม่สำเร็จ' }
+      }
+    } catch (error) {
+      return { success: false, error: `เครือข่ายอินเทอร์เน็ตมีปัญหา: ${String(error)}` }
+    }
+  })
 }

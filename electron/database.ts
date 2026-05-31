@@ -3,12 +3,66 @@ import path from 'path'
 import { app } from 'electron'
 import bcrypt from 'bcryptjs'
 import fs from 'fs'
+import os from 'os'
 
 let db: Database.Database
 
 export function initDatabase(): Database.Database {
   const userDataPath = app.getPath('userData')
   const dbPath = path.join(userDataPath, 'make-a-deal-pos.db')
+
+  let dbIsValid = false
+  try {
+    if (fs.existsSync(dbPath)) {
+      // Try opening the database and running quick check
+      const testDb = new Database(dbPath)
+      const check = testDb.pragma('integrity_check') as any[]
+      testDb.close()
+      if (check[0] && check[0].integrity_check === 'ok') {
+        dbIsValid = true
+      } else {
+        console.error('[DB Check] Database integrity check failed!')
+      }
+    } else {
+      dbIsValid = true // File doesn't exist yet, it's a new clean DB
+    }
+  } catch (err) {
+    console.error('[DB Check] Error opening database for integrity check:', err)
+  }
+
+  if (!dbIsValid) {
+    console.warn('[DB Recovery] Initiating database recovery from latest backup...')
+    try {
+      const homedir = os.homedir()
+      const backupDir = path.join(homedir, 'Documents', 'MakeADeal_Backups')
+      if (fs.existsSync(backupDir)) {
+        const files = fs.readdirSync(backupDir)
+          .filter(f => f.startsWith('backup_') && f.endsWith('.db'))
+          .sort() // Sort alphabetically, which sorts by timestamp backup_YYYY-MM-DD_HH-mm-ss.db
+
+        if (files.length > 0) {
+          const latestBackup = files[files.length - 1]
+          const backupSrcPath = path.join(backupDir, latestBackup)
+          
+          console.warn(`[DB Recovery] Restoring database from backup: ${latestBackup}`)
+          // Rename corrupt database to prevent losing it completely (just in case)
+          const corruptBackupPath = path.join(userDataPath, `make-a-deal-pos_corrupt_${Date.now()}.db`)
+          if (fs.existsSync(dbPath)) {
+            fs.renameSync(dbPath, corruptBackupPath)
+          }
+          // Copy backup to dbPath
+          fs.copyFileSync(backupSrcPath, dbPath)
+          console.log('[DB Recovery] Database successfully restored from backup!')
+        } else {
+          console.error('[DB Recovery] No backup files found in backup directory.')
+        }
+      } else {
+        console.error('[DB Recovery] Backup directory does not exist.')
+      }
+    } catch (recoveryErr) {
+      console.error('[DB Recovery] Database recovery failed:', recoveryErr)
+    }
+  }
 
   db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
@@ -354,6 +408,16 @@ function runMigrations() {
       // Column might already exist
     }
     db.prepare("INSERT OR REPLACE INTO shop_settings (key, value) VALUES ('db_version', '3')").run()
+  }
+
+  if (currentVersion < 4) {
+    // v4: Add is_synced column to sales table for Google Sheets cloud sync
+    try {
+      db.exec(`ALTER TABLE sales ADD COLUMN is_synced INTEGER DEFAULT 0;`)
+    } catch (e) {
+      // Column might already exist
+    }
+    db.prepare("INSERT OR REPLACE INTO shop_settings (key, value) VALUES ('db_version', '4')").run()
   }
 }
 

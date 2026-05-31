@@ -5,6 +5,7 @@ import {
   Save, Check as CheckIcon, ChevronRight, Plus, Edit2, Trash2, X,
   Eye, EyeOff, Key, Lock
 } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
 import toast from 'react-hot-toast'
 import { useSettingsStore, useAuthStore } from '../../store'
 import type { User as UserType } from '../../types'
@@ -12,14 +13,14 @@ import type { User as UserType } from '../../types'
 const api = (window as any).api
 
 const TABS = [
-  { id: 'shop',     label: 'ข้อมูลร้าน',    icon: <Store size={16} /> },
-  { id: 'tax',      label: 'ภาษีและราคา',    icon: <Percent size={16} /> },
-  { id: 'receipt',  label: 'ใบเสร็จ/พิมพ์',  icon: <Printer size={16} /> },
-  { id: 'users',    label: 'ผู้ใช้งาน',      icon: <Users size={16} /> },
-  { id: 'security', label: 'ความปลอดภัย',    icon: <Shield size={16} /> },
-  { id: 'backup',   label: 'สำรองข้อมูล',    icon: <Database size={16} /> },
-  { id: 'language', label: 'ภาษา/ทั่วไป',    icon: <Globe size={16} /> },
-  { id: 'license',  label: 'สิทธิ์การใช้งาน', icon: <Shield size={16} /> },
+  { id: 'shop',     label: 'ข้อมูลร้าน',    icon: <Store size={16} />,     permission: 'settings' },
+  { id: 'tax',      label: 'ภาษีและราคา',    icon: <Percent size={16} />,   permission: 'settings' },
+  { id: 'receipt',  label: 'ใบเสร็จ/พิมพ์',  icon: <Printer size={16} />,   permission: 'settings' },
+  { id: 'users',    label: 'ผู้ใช้งาน',      icon: <Users size={16} />,     permission: 'users' },
+  { id: 'security', label: 'ความปลอดภัย',    icon: <Shield size={16} />,   permission: 'settings' },
+  { id: 'backup',   label: 'สำรองข้อมูล',    icon: <Database size={16} />,   permission: 'backup' },
+  { id: 'language', label: 'ภาษา/ทั่วไป',    icon: <Globe size={16} />,     permission: 'settings' },
+  { id: 'license',  label: 'สิทธิ์การใช้งาน', icon: <Shield size={16} />,   permission: 'settings' },
 ]
 
 const MOCK_USERS: UserType[] = [
@@ -56,6 +57,53 @@ interface UserForm {
   permissions: string[]
 }
 
+const GAS_CODE = `function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var data = JSON.parse(e.postData.contents);
+  if (data.action === "sync_sales") {
+    // 💡 Auto-create styled column headers if the sheet is completely blank!
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow([
+        "เลขที่ใบเสร็จ (Receipt No)",
+        "วันที่ขาย (Date & Time)",
+        "ชื่อสมาชิก (Customer)",
+        "ยอดรวมก่อนลด (Subtotal)",
+        "ส่วนลดสมาชิก/โปรโมชัน (Discount)",
+        "ภาษีมูลค่าเพิ่ม (VAT/Tax)",
+        "ยอดขายสุทธิ (Total Amount)",
+        "ช่องทางชำระเงิน (Payment Method)",
+        "สถานะรายการ (Status)",
+        "แต้มสะสมได้รับ (Points Earned)",
+        "สรุปรายการสินค้า (Items Summary)"
+      ]);
+      // Format headers with bold font and soft grey background for premium look
+      sheet.getRange(1, 1, 1, 11).setFontWeight("bold").setBackground("#f3f4f6");
+    }
+
+    var sales = data.sales;
+    for (var i = 0; i < sales.length; i++) {
+      var sale = sales[i];
+      sheet.appendRow([
+        sale.receipt_no,
+        sale.sale_date,
+        sale.customer_name,
+        sale.subtotal,
+        sale.discount_amount,
+        sale.tax_amount,
+        sale.total,
+        sale.payment_method,
+        sale.status,
+        sale.points_earned,
+        sale.items_summary
+      ]);
+    }
+    return ContentService.createTextOutput(JSON.stringify({ success: true }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  return ContentService.createTextOutput(JSON.stringify({ success: false, error: "Invalid action" }))
+    .setMimeType(ContentService.MimeType.JSON);
+}`;
+
 const EMPTY_FORM: UserForm = {
   name: '', username: '', password: '', confirmPassword: '', pin: '', role: 'cashier', is_active: 1, permissions: ['sales', 'customers']
 }
@@ -85,6 +133,96 @@ export default function SettingsPage() {
   const [showDeactivateModal, setShowDeactivateModal] = useState(false)
   const [deactivating, setDeactivating] = useState(false)
   const [customExporting, setCustomExporting] = useState(false)
+  const [exportYear, setExportYear] = useState('all')
+  const [exportMonth, setExportMonth] = useState('all')
+  const [exportingExcel, setExportingExcel] = useState(false)
+  const [syncingSheets, setSyncingSheets] = useState(false)
+  const [showGasTutorial, setShowGasTutorial] = useState(false)
+  const [lanPort, setLanPort] = useState(8080)
+  const [lanServerActive, setLanServerActive] = useState(false)
+  const [localIps, setLocalIps] = useState<string[]>([])
+
+  const handleSyncGoogleSheets = async () => {
+    if (!api || !api.backup) {
+      toast.error('ไม่สามารถเรียกใช้งาน API ของระบบได้')
+      return
+    }
+
+    setSyncingSheets(true)
+    const loadToastId = toast.loading('กำลังเชื่อมต่อและซิงก์ข้อมูลไปยัง Google Sheets...')
+    try {
+      const res = await api.backup.syncGoogleSheets()
+      toast.dismiss(loadToastId)
+      if (res.success) {
+        if (res.count > 0) {
+          toast.success(`ซิงก์ข้อมูลยอดขายใหม่จำนวน ${res.count} รายการสำเร็จแล้ว!`)
+        } else {
+          toast.success('ข้อมูลยอดขายทั้งหมดได้รับการซิงก์เป็นปัจจุบันแล้ว')
+        }
+      } else {
+        toast.error(`ซิงก์ไม่สำเร็จ: ${res.error || 'เกิดข้อผิดพลาดไม่ทราบสาเหตุ'}`)
+      }
+    } catch (err) {
+      toast.dismiss(loadToastId)
+      toast.error(`เกิดข้อผิดพลาด: ${String(err)}`)
+    } finally {
+      setSyncingSheets(false)
+    }
+  }
+
+  const handleExportSalesReport = async () => {
+    if (!api || !api.dialog || !api.reports) {
+      toast.error('ไม่สามารถเรียกใช้งาน API ของระบบได้')
+      return
+    }
+
+    try {
+      let fromDate = '1970-01-01'
+      let toDate = '2099-12-31'
+
+      if (exportYear !== 'all') {
+        if (exportMonth !== 'all') {
+          const yr = parseInt(exportYear)
+          const mn = parseInt(exportMonth)
+          const lastDay = new Date(yr, mn, 0).getDate()
+          fromDate = `${exportYear}-${exportMonth}-01`
+          toDate = `${exportYear}-${exportMonth}-${String(lastDay).padStart(2, '0')}`
+        } else {
+          fromDate = `${exportYear}-01-01`
+          toDate = `${exportYear}-12-31`
+        }
+      }
+
+      const defaultFileName = `sales_report_${exportYear !== 'all' ? exportYear : 'all'}${exportMonth !== 'all' && exportYear !== 'all' ? '_' + exportMonth : ''}.xlsx`
+      
+      const saveRes = await api.dialog.saveFile(defaultFileName, [
+        { name: 'Excel Files', extensions: ['xlsx'] }
+      ])
+
+      if (saveRes.canceled || !saveRes.filePath) {
+        return
+      }
+
+      const targetFilePath = saveRes.filePath
+      setExportingExcel(true)
+      
+      const loadToastId = toast.loading('กำลังประมวลผลธุรกรรมและบันทึกเป็นไฟล์ Excel...')
+      
+      const res = await api.reports.exportSalesExcel(fromDate, toDate, targetFilePath, currentUser?.id)
+      
+      toast.dismiss(loadToastId)
+      
+      if (res.success) {
+        toast.success('ส่งออกรายงานยอดขายเป็นไฟล์ Excel เรียบร้อยแล้ว!')
+      } else {
+        toast.error(`ส่งออกไม่สำเร็จ: ${res.error || 'เกิดข้อผิดพลาดไม่ทราบสาเหตุ'}`)
+      }
+    } catch (err) {
+      toast.error(`เกิดข้อผิดพลาด: ${String(err)}`)
+    } finally {
+      setExportingExcel(false)
+    }
+  }
 
   const loadLicenseInfo = async () => {
     if ((window as any).api && (window as any).api.system) {
@@ -97,7 +235,50 @@ export default function SettingsPage() {
 
   // Load settings + users on mount
   useEffect(() => { setLocal({ ...settings }) }, [settings])
-  useEffect(() => { loadUsers(); loadLicenseInfo() }, [])
+  useEffect(() => { 
+    loadUsers()
+    loadLicenseInfo() 
+    loadLANServerInfo()
+  }, [])
+
+  const loadLANServerInfo = async () => {
+    if (api && api.lanServer) {
+      const res = await api.lanServer.getStatus()
+      setLanServerActive(res.running)
+      setLanPort(res.port)
+      
+      const ips = await api.lanServer.getLocalIPs()
+      setLocalIps(ips || [])
+    }
+  }
+
+  const handleToggleLANServer = async (active: boolean) => {
+    if (!api || !api.lanServer) {
+      toast.error('ไม่สามารถเรียกใช้งาน API เครือข่ายของระบบได้')
+      return
+    }
+
+    if (active) {
+      const res = await api.lanServer.start(lanPort)
+      if (res.success) {
+        setLanServerActive(true)
+        toast.success(`เปิดรันเซิร์ฟเวอร์ย่อยในวงแลนที่พอร์ต ${res.port} สำเร็จแล้ว!`)
+        // Refresh IPs
+        const ips = await api.lanServer.getLocalIPs()
+        setLocalIps(ips || [])
+      } else {
+        toast.error(`ไม่สามารถเปิดเซิร์ฟเวอร์ย่อยได้: ${res.error || 'เกิดข้อผิดพลาดไม่ทราบสาเหตุ'}`)
+      }
+    } else {
+      const res = await api.lanServer.stop()
+      if (res.success) {
+        setLanServerActive(false)
+        toast.success('ปิดรันเซิร์ฟเวอร์ย่อยในวงแลนแล้ว')
+      } else {
+        toast.error('ไม่สามารถปิดการทำงานเซิร์ฟเวอร์ย่อยได้')
+      }
+    }
+  }
 
   const loadUsers = async () => {
     if (!api) return
@@ -279,7 +460,20 @@ export default function SettingsPage() {
 
       {/* Left tab menu */}
       <div style={{ width: 200, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {TABS.map(t => (
+        {TABS.filter(t => {
+          if (!currentUser) return false
+          if (currentUser.role === 'admin') return true
+
+          let perms: string[] = []
+          if (Array.isArray(currentUser.permissions)) {
+            perms = currentUser.permissions
+          } else if (typeof currentUser.permissions === 'string') {
+            try { perms = JSON.parse(currentUser.permissions) } catch { perms = [] }
+          }
+
+          if (perms.includes('all')) return true
+          return perms.includes(t.permission)
+        }).map(t => (
           <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
             width: '100%', padding: '10px 14px', textAlign: 'left',
             background:   activeTab === t.id ? 'rgba(34,197,94,0.12)' : 'transparent',
@@ -568,6 +762,400 @@ export default function SettingsPage() {
                       {customExporting ? 'กำลังส่งออกข้อมูล...' : 'เลือกโฟลเดอร์ปลายทาง และสำรองข้อมูล'}
                     </button>
                   </div>
+                </div>
+              </SettingRow>
+
+              <SettingRow label="ส่งออกรายงานยอดขาย (Export Reported)">
+                <div style={{
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  borderRadius: 14,
+                  padding: '20px 24px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
+                  marginTop: 10,
+                }}>
+                  <div style={{ fontSize: 13, color: '#10b981', fontWeight: 600, lineHeight: 1.4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Save size={15} /> ส่งออกรายงานยอดขายออกมาเป็นไฟล์ Excel (.xlsx)
+                  </div>
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', lineHeight: 1.5 }}>
+                    ฟีเจอร์สำหรับดึงรายงานสรุปยอดขายตามข้อมูลที่เก็บอยู่ในระบบ เพื่อให้ง่ายต่อการนำไปใช้งานจริงของลูกค้า สามารถเลือกกรองตามปี/เดือน หรือดึงข้อมูลทั้งหมดได้ทันที
+                  </div>
+                  
+                  {/* Filters */}
+                  <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+                      <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>เลือกปี (Year)</span>
+                      <select 
+                        className="glass-input" 
+                        value={exportYear} 
+                        onChange={e => {
+                          setExportYear(e.target.value);
+                          if (e.target.value === 'all') setExportMonth('all');
+                        }}
+                        style={{ background: 'rgba(0,0,0,0.25)', color: 'rgba(255,255,255,0.85)' }}
+                      >
+                        <option value="all">ทั้งหมด (All Years)</option>
+                        <option value="2026">2026</option>
+                        <option value="2025">2025</option>
+                        <option value="2024">2024</option>
+                        <option value="2023">2023</option>
+                        <option value="2022">2022</option>
+                      </select>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+                      <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>เลือกเดือน (Month)</span>
+                      <select 
+                        className="glass-input" 
+                        value={exportMonth} 
+                        disabled={exportYear === 'all'}
+                        onChange={e => setExportMonth(e.target.value)}
+                        style={{ 
+                          background: 'rgba(0,0,0,0.25)', 
+                          color: exportYear === 'all' ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.85)',
+                          cursor: exportYear === 'all' ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        <option value="all">ทั้งหมด (All Months)</option>
+                        <option value="01">มกราคม (01)</option>
+                        <option value="02">กุมภาพันธ์ (02)</option>
+                        <option value="03">มีนาคม (03)</option>
+                        <option value="04">เมษายน (04)</option>
+                        <option value="05">พฤษภาคม (05)</option>
+                        <option value="06">มิถุนายน (06)</option>
+                        <option value="07">กรกฎาคม (07)</option>
+                        <option value="08">สิงหาคม (08)</option>
+                        <option value="09">กันยายน (09)</option>
+                        <option value="10">ตุลาคม (10)</option>
+                        <option value="11">พฤศจิกายน (11)</option>
+                        <option value="12">ธันวาคม (12)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 4 }}>
+                    <button
+                      onClick={handleExportSalesReport}
+                      disabled={exportingExcel}
+                      className="glass-btn"
+                      style={{
+                        background: exportingExcel ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg, rgba(16,185,129,0.2), rgba(5,150,105,0.2))',
+                        border: '1px solid rgba(16,185,129,0.35)',
+                        borderRadius: 10,
+                        padding: '10px 18px',
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: exportingExcel ? 'rgba(255,255,255,0.3)' : '#10b981',
+                        cursor: exportingExcel ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        transition: 'all 0.2s',
+                        opacity: exportingExcel ? 0.6 : 1
+                      }}
+                      onMouseEnter={e => {
+                        if (!exportingExcel) {
+                          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(16,185,129,0.3), rgba(5,150,105,0.3))'
+                          e.currentTarget.style.borderColor = 'rgba(16,185,129,0.5)'
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (!exportingExcel) {
+                          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(16,185,129,0.2), rgba(5,150,105,0.2))'
+                          e.currentTarget.style.borderColor = 'rgba(16,185,129,0.35)'
+                        }
+                      }}
+                    >
+                      <Save size={14} />
+                      {exportingExcel ? 'กำลังส่งออกรายงาน...' : 'ส่งออกรายงาน Excel (Export Reported)'}
+                    </button>
+                  </div>
+                </div>
+              </SettingRow>
+
+              <SettingRow label="ระบบเชื่อมต่อ Google Sheets Cloud Sync">
+                <div style={{
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  borderRadius: 14,
+                  padding: '20px 24px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
+                  marginTop: 10,
+                }}>
+                  <div style={{ fontSize: 13, color: '#3b82f6', fontWeight: 600, lineHeight: 1.4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Globe size={15} /> ซิงก์ข้อมูลยอดขายไปยังบัญชี Google Sheets ของคุณแบบเรียลไทม์
+                  </div>
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', lineHeight: 1.5 }}>
+                    คุณสามารถส่งและอัปเดตข้อมูลการขายในเครื่อง POS นี้ เข้าไปยังไฟล์ Google Sheets ดั้งเดิมของคุณได้ทันที เมื่อเปลี่ยนเครื่องคอมพิวเตอร์ในอนาคต เพียงคัดลอกลิงก์มาใส่ ข้อมูลจะถูกบันทึกต่อจากรายการเดิมโดยอัตโนมัติ
+                  </div>
+
+                  {/* Input link field */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>ลิงก์ Google Sheets Web App URL *</span>
+                    <input 
+                      className="glass-input" 
+                      value={local.google_sheet_url || ''} 
+                      onChange={e => setField('google_sheet_url', e.target.value)} 
+                      placeholder="วางลิงก์ https://script.google.com/macros/s/..." 
+                      style={{ fontFamily: 'monospace', fontSize: 12 }}
+                    />
+                    <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', lineHeight: 1.4 }}>
+                      * ต้องใช้ลิงก์ที่สร้างจาก Google Apps Script (ไม่ใช่ลิงก์ของ Google Sheets ตรงๆ) เพื่อความปลอดภัยและความเสถียรสูงสุดตามมาตรฐานระบบ POS
+                    </p>
+                  </div>
+
+                  {/* Buttons */}
+                  <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                    <button
+                      type="button"
+                      onClick={handleSyncGoogleSheets}
+                      disabled={syncingSheets}
+                      className="glass-btn"
+                      style={{
+                        background: syncingSheets ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg, rgba(59,130,246,0.2), rgba(37,99,235,0.2))',
+                        border: '1px solid rgba(59,130,246,0.35)',
+                        borderRadius: 10,
+                        padding: '10px 18px',
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: syncingSheets ? 'rgba(255,255,255,0.3)' : '#60a5fa',
+                        cursor: syncingSheets ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        transition: 'all 0.2s',
+                        opacity: syncingSheets ? 0.6 : 1
+                      }}
+                      onMouseEnter={e => {
+                        if (!syncingSheets) {
+                          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(59,130,246,0.3), rgba(37,99,235,0.3))'
+                          e.currentTarget.style.borderColor = 'rgba(59,130,246,0.5)'
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (!syncingSheets) {
+                          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(59,130,246,0.2), rgba(37,99,235,0.2))'
+                          e.currentTarget.style.borderColor = 'rgba(59,130,246,0.35)'
+                        }
+                      }}
+                    >
+                      <Globe size={14} />
+                      {syncingSheets ? 'กำลังประมวลผลการซิงก์...' : 'ซิงก์ข้อมูลไป Google Sheets (Sync Now)'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowGasTutorial(v => !v)}
+                      className="glass-btn btn-secondary"
+                      style={{
+                        borderRadius: 10,
+                        padding: '10px 18px',
+                        fontSize: 13,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6
+                      }}
+                    >
+                      💡 {showGasTutorial ? 'ซ่อนคู่มือวิธีตั้งค่า' : 'ดูคู่มือขั้นตอนการตั้งค่า (ฟรีใน 3 นาที)'}
+                    </button>
+                  </div>
+
+                  {/* Expandable GAS Tutorial */}
+                  {showGasTutorial && (
+                    <div style={{
+                      background: 'rgba(0,0,0,0.2)',
+                      border: '1px solid rgba(255,255,255,0.05)',
+                      borderRadius: 10,
+                      padding: 16,
+                      marginTop: 10,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 12
+                    }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#fcd34d' }}>
+                        📖 คู่มือขั้นตอนการเชื่อมต่อ Google Sheets ใน 3 นาที:
+                      </div>
+                      <ol style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', lineHeight: 1.6, paddingLeft: 20, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <li>สร้างหรือเปิดไฟล์ <strong>Google Sheet</strong> ที่คุณต้องการนำข้อมูลไปเก็บไว้</li>
+                        <li>ที่เมนูด้านบน กดไปที่ <strong>ส่วนขยาย (Extensions) &gt; Apps Script</strong></li>
+                        <li>ลบโค้ดเดิมในไฟล์ทิ้งให้หมด แล้วกดปุ่ม <strong>"คัดลอกโค้ด Apps Script"</strong> ด้านล่างนี้ไปวางแทนที่:</li>
+                      </ol>
+
+                      {/* GAS Script Copy Section */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace' }}>Code.gs (Apps Script)</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(GAS_CODE)
+                              toast.success('คัดลอกโค้ด Apps Script ลงในคลิปบอร์ดแล้ว! สามารถนำไปวางได้ทันที')
+                            }}
+                            className="glass-btn"
+                            style={{ padding: '4px 10px', fontSize: 11, background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)', color: '#4ade80', borderRadius: 6 }}
+                          >
+                            คัดลอกโค้ด Apps Script
+                          </button>
+                        </div>
+                        <pre style={{
+                          margin: 0,
+                          fontSize: 10,
+                          maxHeight: 180,
+                          overflowY: 'auto',
+                          fontFamily: 'monospace',
+                          color: '#a7f3d0',
+                          background: 'rgba(0,0,0,0.3)',
+                          padding: 10,
+                          borderRadius: 6,
+                          whiteSpace: 'pre-wrap',
+                          lineHeight: 1.4
+                        }}>
+                          {GAS_CODE}
+                        </pre>
+                      </div>
+
+                      <ol start={4} style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', lineHeight: 1.6, paddingLeft: 20, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <li>กดปุ่มบันทึกโครงการ (รูปแผ่นดิสก์)</li>
+                        <li>กดปุ่ม <strong>การทำให้ใช้งานได้ (Deploy) &gt; การทำให้ใช้งานได้ใหม่ (New deployment)</strong></li>
+                        <li>ที่สัญลักษณ์ฟันเฟืองทางซ้าย เลือกประเภทเป็น <strong>เว็บแอป (Web app)</strong></li>
+                        <li>ตั้งค่าตามนี้:
+                          <ul style={{ paddingLeft: 20, listStyleType: 'disc', marginTop: 4 }}>
+                            <li>ผู้มีสิทธิ์เข้าถึง (Who has access) = <strong>ทุกคน (Anyone)</strong> *(สำคัญมาก! เพื่อให้โปรแกรม POS ส่งข้อมูลได้)*</li>
+                            <li>เรียกใช้ในฐานะ (Execute as) = <strong>ฉัน (Me)</strong></li>
+                          </ul>
+                        </li>
+                        <li>กด <strong>ทำให้ใช้งานได้ (Deploy)</strong> แล้วระบบจะขอให้อนุญาตสิทธิ์ (Authorize access) ให้กดเลือกบัญชี Google ของคุณ แล้วกด Advanced &gt; Go to Untitled project (unsafe) เพื่อยืนยัน</li>
+                        <li>หลังจาก Deployment สำเร็จ ให้คัดลอก <strong>URL เว็บแอป (Web app URL)</strong> ที่ได้ นำมาวางลงในช่อง "ลิงก์ Google Sheets Web App URL" ด้านบนสุด แล้วกดบันทึกการตั้งค่าระบบ</li>
+                      </ol>
+                    </div>
+                  )}
+                </div>
+              </SettingRow>
+
+              <SettingRow label="ระบบแชร์หน้าจอเครื่องลูกข่าย (Local LAN Server)">
+                <div style={{
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  borderRadius: 14,
+                  padding: '20px 24px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
+                  marginTop: 10,
+                }}>
+                  <div style={{ fontSize: 13, color: '#f59e0b', fontWeight: 600, lineHeight: 1.4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Globe size={15} /> ตัวเปิดเซิร์ฟเวอร์ย่อยในวงแลนเพื่อต่อพ่วง iPad, แท็บเล็ต และสมาร์ทโฟน
+                  </div>
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', lineHeight: 1.5 }}>
+                    เปิดจำลองเครื่องแม่ Windows ตัวนี้เป็นเว็บเซิร์ฟเวอร์ส่วนตัวภายในร้านค้า เพื่อให้โทรศัพท์มือถือ หรือแท็บเล็ตของพนักงานรับออเดอร์เชื่อมเข้าพิมพ์บิลคิดเงินได้พร้อมกันหลาย ๆ จุดโดยไม่ต้องต่อเน็ตบ้าน
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: 16, alignItems: 'center', background: 'rgba(0,0,0,0.15)', padding: 14, borderRadius: 10, border: '1px solid rgba(255,255,255,0.04)' }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: lanServerActive ? '#22c55e' : 'rgba(255,255,255,0.4)' }}>
+                        {lanServerActive ? '● กำลังเปิดใช้งานระบบเครือข่ายแชร์หน้าจอ' : '○ ระบบเซิร์ฟเวอร์แชร์หน้าจอปิดใช้งานอยู่'}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>
+                        {lanServerActive ? 'อุปกรณ์ในร้านเชื่อมต่อ Wi-Fi และเปิดกล้องสแกน QR Code เข้างานได้ทันที' : 'เปิดรันเพื่อเชื่อมระบบจุดคิดเงินขยายเข้ากับแท็บเล็ต/มือถือ'}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <Toggle checked={lanServerActive} onChange={handleToggleLANServer} />
+                    </div>
+                  </div>
+
+                  {/* Port Selection if inactive */}
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>ตั้งค่าหมายเลขพอร์ตแชร์ข้อมูล (Server Port):</span>
+                    <input 
+                      type="number"
+                      className="glass-input" 
+                      value={lanPort} 
+                      disabled={lanServerActive}
+                      onChange={e => setLanPort(parseInt(e.target.value) || 8080)} 
+                      placeholder="8080" 
+                      style={{ maxWidth: 100, fontSize: 12, background: 'rgba(0,0,0,0.2)', textAlign: 'center', opacity: lanServerActive ? 0.6 : 1 }}
+                    />
+                  </div>
+
+                  {/* Active Connection Information and QR Codes */}
+                  {lanServerActive && localIps.length > 0 && (
+                    <div style={{
+                      background: 'rgba(34,197,94,0.03)',
+                      border: '1px solid rgba(34,197,94,0.15)',
+                      borderRadius: 12,
+                      padding: 18,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 16,
+                      marginTop: 6
+                    }}>
+                      <div style={{ fontSize: 12, color: '#4ade80', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        🚀 ลิงก์เชื่อมโยง IP สำหรับเครื่องลูก (iPad / Tablet / Phone):
+                      </div>
+                      
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'center', justifyContent: 'space-between' }}>
+                        
+                        {/* List of IP addresses */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
+                          {localIps.map(ip => {
+                            const url = `http://${ip}:${lanPort}`
+                            return (
+                              <div key={ip} style={{ display: 'flex', flexDirection: 'column', gap: 4, background: 'rgba(0,0,0,0.3)', padding: '10px 14px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.05)' }}>
+                                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>ที่อยู่ IP เครือข่ายเครื่องแม่:</span>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                                  <span style={{ fontSize: 13, fontFamily: 'monospace', color: '#60a5fa', fontWeight: 600 }}>{url}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(url)
+                                      toast.success('คัดลอกลิงก์เครื่องแม่แล้ว!')
+                                    }}
+                                    className="glass-btn"
+                                    style={{ padding: '3px 8px', fontSize: 11, background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.3)', color: '#60a5fa', borderRadius: 4 }}
+                                  >
+                                    คัดลอกลิงก์
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+
+                        {/* QR Code Container */}
+                        <div style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: 8,
+                          background: 'white',
+                          padding: 14,
+                          borderRadius: 14,
+                          boxShadow: '0 4px 15px rgba(0,0,0,0.3)',
+                          flexShrink: 0
+                        }}>
+                          <QRCodeSVG 
+                            value={`http://${localIps[0]}:${lanPort}`}
+                            size={120}
+                            bgColor={"#ffffff"}
+                            fgColor={"#0a0a0f"}
+                            level={"L"}
+                            includeMargin={false}
+                          />
+                          <span style={{ fontSize: 10, color: '#0a0a0f', fontWeight: 700, letterSpacing: '0.02em', marginTop: 4 }}>สแกนกล้องเพื่อเปิด POS</span>
+                        </div>
+
+                      </div>
+                      
+                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', lineHeight: 1.4, borderTop: '1px solid rgba(34,197,94,0.1)', paddingTop: 10, marginTop: 4 }}>
+                        💡 <strong>คำแนะนำการใช้งาน:</strong> เปิดแอปพลิเคชันกล้องบน <strong>iPad / Tablet / โทรศัพท์มือถือ</strong> ของคุณ แล้วเล็งกล้องมาสแกนคิวอาร์โค้ดด้านบนนี้ ระบบจะเด้งหน้าจอรหัสผ่านแคชเชียร์และระบบขายสินค้าขึ้นมาใช้งานได้ทันทีอย่างสมบูรณ์แบบโดยไม่ต้องติดตั้งแอปพลิเคชันใด ๆ เพิ่มเติมเลยครับ!
+                      </div>
+                    </div>
+                  )}
                 </div>
               </SettingRow>
             </Section>

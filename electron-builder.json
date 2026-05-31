@@ -27,6 +27,7 @@
   },
   "nsis": {
     "oneClick": false,
+    "include": "build-resources/installer.nsh",
     "allowToChangeInstallationDirectory": true,
     "allowElevation": true,
     "createDesktopShortcut": "always",

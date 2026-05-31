@@ -22,6 +22,7 @@ const api = (window as unknown as { api?: unknown }).api as {
     getAll: () => Promise<{ success: boolean; data?: Category[] }>
   }
   promotions: {
+    getAll: () => Promise<{ success: boolean; data?: Promotion[] }>
     validate: (code: string, total: number) => Promise<{ success: boolean; data?: Promotion; error?: string }>
   }
 } | undefined
@@ -42,7 +43,7 @@ export default function POSPage() {
   const {
     items, customer, discount, discountType, coupon, note,
     addItem, updateItem, removeItem, clearCart, setCustomer,
-    setDiscount, setCoupon, setNote, getSubtotal, getDiscountAmount, getTotal
+    setDiscount, setCoupon, setPromotionsList, setNote, getSubtotal, getDiscountAmount, getTotal
   } = useCartStore()
 
   const { user } = useAuthStore()
@@ -52,7 +53,17 @@ export default function POSPage() {
   useEffect(() => {
     loadCategories()
     loadProducts()
+    loadPromotions()
   }, [])
+
+  const loadPromotions = async () => {
+    if (api && api.promotions && api.promotions.getAll) {
+      const res = await api.promotions.getAll()
+      if (res.success && res.data) {
+        setPromotionsList(res.data)
+      }
+    }
+  }
 
   useEffect(() => {
     filterProducts()
@@ -183,6 +194,7 @@ export default function POSPage() {
       discount_percent: 0,
       total: price,
       is_service: product.is_service,
+      product: product
     }
     addItem(item)
     toast.success(`เพิ่ม ${product.name}`, { duration: 1200 })
