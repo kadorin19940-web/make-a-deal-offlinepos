@@ -1,0 +1,54 @@
+{
+  "appId": "com.makeadeal.pos.solo",
+  "productName": "Make a Deal POS (Solo)",
+  "copyright": "Copyright © 2026 Make a Deal",
+  "directories": {
+    "output": "release",
+    "buildResources": "build-resources"
+  },
+  "files": [
+    "dist/**/*",
+    "dist-electron/**/*",
+    "node_modules/**/*",
+    "package.json"
+  ],
+  "asar": true,
+  "asarUnpack": [
+    "**/node_modules/better-sqlite3/**/*"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "build-resources/icon.ico"
+  },
+  "nsis": {
+    "oneClick": true,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": "always",
+    "createStartMenuShortcut": true,
+    "shortcutName": "Make a Deal POS (Solo)",
+    "menuCategory": "Make a Deal POS",
+    "runAfterFinish": true,
+    "installerIcon": "build-resources/icon.ico",
+    "uninstallerIcon": "build-resources/icon.ico",
+    "installerHeaderIcon": "build-resources/icon.ico",
+    "installerLanguages": ["th", "en"],
+    "deleteAppDataOnUninstall": false,
+    "artifactName": "Make-a-Deal-POS-Solo-Setup-${version}.exe"
+  },
+  "mac": {
+    "target": "dmg",
+    "icon": "build-resources/icon.icns",
+    "category": "public.app-category.business"
+  },
+  "linux": {
+    "target": "AppImage",
+    "icon": "build-resources/icon.png"
+  },
+  "publish": null
+}

@@ -11,7 +11,7 @@ on:
 
 jobs:
   build-windows:
-    name: Build & Package Windows x64 Installer
+    name: Build & Package Windows x64 Installers
     runs-on: windows-latest
 
     steps:
@@ -25,47 +25,96 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies (clean install)
-        # Using 'npm ci' ensures we install the exact locked dependency tree
-        # Node 20 has prebuilt better-sqlite3 binaries, so host-installation is fast and stable
         run: npm ci
 
-      - name: Build production application
-        # Compiles both the React frontend and the Electron backend (main/IPC) into their respective output folders
-        run: npm run build
-
       - name: Rebuild native C++ modules for Electron
-        # CRITICAL: Rebuilds better-sqlite3 specifically targeting the target Electron version
-        # specified in your package.json, preventing runtime DLL loading failures on the user's PC.
         run: npx electron-builder install-app-deps
 
-      - name: Build Windows Installer (.exe)
-        # Uses electron-builder to package the app into a professional NSIS wizard-style installer
-        run: npx electron-builder --win --x64
+      # ========================================================================
+      # PHASE 1: BUILD & PACKAGE SOLO STANDARD
+      # ========================================================================
+      - name: Configure Build Target - Solo Standard
+        run: |
+          New-Item -ItemType Directory -Force -Path public
+          echo '{"packageType": "solo"}' > public/build-config.json
+
+      - name: Build production application (Solo)
+        run: npm run build
+
+      - name: Build Windows Installer - Solo (.exe)
+        run: npx electron-builder --win --x64 -c electron-builder.solo.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Bundle Installer and Guides into ZIP
-        # Combines the installer (.exe), UserLogin.txt, and คู่มือการติดตั้ง.txt into a single compressed .zip file
+      - name: Bundle Solo Setup and Guides
         run: |
-          New-Item -ItemType Directory -Force -Path dist-zip
-          Copy-Item -Path "release\*.exe" -Destination "dist-zip"
-          Copy-Item -Path "UserLogin.txt" -Destination "dist-zip"
-          Copy-Item -Path "คู่มือการติดตั้ง.txt" -Destination "dist-zip"
-          Compress-Archive -Path "dist-zip\*" -DestinationPath "release\Make-a-Deal-POS-Windows.zip"
+          New-Item -ItemType Directory -Force -Path dist-zip-solo
+          Copy-Item -Path "release\*.exe" -Destination "dist-zip-solo"
+          Copy-Item -Path "UserLogin.txt" -Destination "dist-zip-solo"
+          Copy-Item -Path "คู่มือการติดตั้ง.txt" -Destination "dist-zip-solo"
+          Compress-Archive -Path "dist-zip-solo\*" -DestinationPath "release\Make-a-Deal-POS-Solo-Windows.zip"
 
-      - name: Upload Installer Artifact
+      - name: Store Solo Zip to Central Directory
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-releases
+          Copy-Item -Path "release\Make-a-Deal-POS-Solo-Windows.zip" -Destination "dist-releases"
+
+      # ========================================================================
+      # PHASE 2: SURGICAL CACHE CLEANUP
+      # ========================================================================
+      - name: Surgical Cache Cleanup for LAN Build
+        run: |
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue dist, dist-electron, release, dist-zip-solo
+
+      # ========================================================================
+      # PHASE 3: BUILD & PACKAGE LAN MULTI-STATION
+      # ========================================================================
+      - name: Configure Build Target - LAN Multi-Station
+        run: |
+          echo '{"packageType": "lan"}' > public/build-config.json
+
+      - name: Build production application (LAN)
+        run: npm run build
+
+      - name: Build Windows Installer - LAN (.exe)
+        run: npx electron-builder --win --x64 -c electron-builder.lan.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bundle LAN Setup and Guides
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-zip-lan
+          Copy-Item -Path "release\*.exe" -Destination "dist-zip-lan"
+          Copy-Item -Path "UserLogin.txt" -Destination "dist-zip-lan"
+          Copy-Item -Path "คู่มือการติดตั้ง.txt" -Destination "dist-zip-lan"
+          Compress-Archive -Path "dist-zip-lan\*" -DestinationPath "release\Make-a-Deal-POS-LAN-Windows.zip"
+
+      - name: Store LAN Zip to Central Directory
+        run: |
+          Copy-Item -Path "release\Make-a-Deal-POS-LAN-Windows.zip" -Destination "dist-releases"
+
+      # ========================================================================
+      # PHASE 4: UPLOAD & RELEASE ARTIFACTS
+      # ========================================================================
+      - name: Upload Solo Installer Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Make-a-Deal-POS-Windows-Installer
-          path: release/Make-a-Deal-POS-Windows.zip
+          name: Make-a-Deal-POS-Solo-Windows-Installer
+          path: dist-releases/Make-a-Deal-POS-Solo-Windows.zip
+          retention-days: 30
+
+      - name: Upload LAN Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Make-a-Deal-POS-LAN-Windows-Installer
+          path: dist-releases/Make-a-Deal-POS-LAN-Windows.zip
           retention-days: 30
 
       - name: Create GitHub Release
-        # If triggered by a release tag, automatically publish the installer to a new GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: release/Make-a-Deal-POS-Windows.zip
+          files: dist-releases/*.zip
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

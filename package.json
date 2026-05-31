@@ -11,6 +11,8 @@
     "build:electron": "tsc -p tsconfig.electron.json",
     "start": "electron .",
     "dist:win": "npm run build && npx electron-builder --win",
+    "dist:win:solo": "npm run build && npx electron-builder --win -c electron-builder.solo.json",
+    "dist:win:lan": "npm run build && npx electron-builder --win -c electron-builder.lan.json",
     "dist:mac": "npm run build && npx electron-builder --mac",
     "dist:linux": "npm run build && npx electron-builder --linux",
     "preview": "vite preview",

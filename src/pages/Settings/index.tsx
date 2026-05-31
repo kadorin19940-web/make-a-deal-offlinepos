@@ -9,6 +9,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import toast from 'react-hot-toast'
 import { useSettingsStore, useAuthStore } from '../../store'
 import type { User as UserType } from '../../types'
+import buildConfig from '../../../public/build-config.json'
 
 const api = (window as any).api
 
@@ -1046,7 +1047,56 @@ export default function SettingsPage() {
                   flexDirection: 'column',
                   gap: 12,
                   marginTop: 10,
+                  position: 'relative',
+                  overflow: 'hidden'
                 }}>
+                  {buildConfig.packageType === 'solo' && (
+                    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center backdrop-blur-md bg-slate-950/70 p-6 text-center select-none" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(10, 10, 15, 0.75)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 24, borderRadius: 14 }}>
+                      <div style={{
+                        background: 'linear-gradient(135deg, #f59e0b, #ef4444)',
+                        padding: 14,
+                        borderRadius: '50%',
+                        color: 'white',
+                        boxShadow: '0 0 20px rgba(245, 158, 11, 0.4)',
+                        marginBottom: 16,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        <Lock size={28} />
+                      </div>
+                      <h4 style={{ fontSize: 15, fontWeight: 700, color: '#f59e0b', marginBottom: 8, letterSpacing: '0.03em' }}>
+                        🔒 ฟีเจอร์แชร์หน้าจอสำหรับเครื่องลูกข่าย (เฉพาะรุ่น LAN Multi-Station)
+                      </h4>
+                      <p style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.7)', lineHeight: 1.6, maxWidth: 460, margin: '0 auto 20px auto' }}>
+                        ระบบการจำลองพอร์ตเครือข่ายเป็นวงแลนเครื่องแม่ สงวนไว้สำหรับแพ็กเกจลิขสิทธิ์ระดับ **LAN Multi-Station** ขึ้นไปเท่านั้น หากท่านใช้งานระบบ Solo Standard และต้องการอัปเกรดเพื่อเปิดต่อพ่วงรับออเดอร์จาก **iPad, แท็บเล็ต หรือสมาร์ทโฟน** สามารถติดต่อเจ้าหน้าที่ฝ่ายดูแลลูกค้าเพื่อสั่งซื้อสิทธิ์ปลดล็อกได้ทันทีครับ
+                      </p>
+                      <a 
+                        href="https://line.me/ti/p/@makeadeal" 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="glass-btn"
+                        style={{
+                          background: 'linear-gradient(135deg, #f59e0b, #f97316)',
+                          color: 'white',
+                          border: 'none',
+                          padding: '10px 22px',
+                          borderRadius: 8,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          textDecoration: 'none',
+                          boxShadow: '0 4px 15px rgba(245, 158, 11, 0.35)',
+                          transition: 'all 0.2s ease-in-out'
+                        }}
+                      >
+                        <Globe size={14} /> ติดต่อสั่งซื้อคีย์อัปเกรด (LINE ID: @makeadeal)
+                      </a>
+                    </div>
+                  )}
                   <div style={{ fontSize: 13, color: '#f59e0b', fontWeight: 600, lineHeight: 1.4, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <Globe size={15} /> ตัวเปิดเซิร์ฟเวอร์ย่อยในวงแลนเพื่อต่อพ่วง iPad, แท็บเล็ต และสมาร์ทโฟน
                   </div>

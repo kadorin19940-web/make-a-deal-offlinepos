@@ -2,12 +2,37 @@ import http from 'http'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { ipcMain } from 'electron'
+import { ipcMain, app } from 'electron'
 import { Database } from 'better-sqlite3'
 
 let serverInstance: http.Server | null = null
 let serverPort: number = 8080
 let serverIsRunning: boolean = false
+
+// Dynamically read build-config.json at runtime (Bulletproof Surgical Resolution)
+function getPackageType(): string {
+  try {
+    const baseDir = app.getAppPath()
+    const pathsToCheck = [
+      path.join(baseDir, 'dist', 'build-config.json'),
+      path.join(baseDir, 'public', 'build-config.json'),
+      path.join(baseDir, 'build-config.json')
+    ]
+
+    for (const p of pathsToCheck) {
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf8')
+        const config = JSON.parse(raw)
+        if (config && config.packageType) {
+          return config.packageType
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[LAN Server] Error reading runtime build config:', err)
+  }
+  return 'lan' // Fallback to 'lan' for safety
+}
 
 // Scan all local IP addresses of the machine
 export function getLocalIPAddresses(): string[] {
@@ -27,6 +52,15 @@ export function getLocalIPAddresses(): string[] {
 }
 
 export function startLANServer(db: Database, port: number): { success: boolean; port?: number; error?: string } {
+  // Enforce Backend Isolation: Deny starting LAN Server if app is built for Solo Standard
+  const packageType = getPackageType()
+  if (packageType === 'solo') {
+    return {
+      success: false,
+      error: 'ระบบเครื่องคิดเงินหน้าร้านติดตั้งภายใต้ลิขสิทธิ์แพ็กเกจ Solo Standard (สิทธิ์เครื่องเดี่ยว) ไม่อนุญาตให้เปิดใช้งานเซิร์ฟเวอร์เครือข่ายได้ครับ'
+    }
+  }
+
   if (serverIsRunning && serverInstance) {
     return { success: true, port: serverPort }
   }
