@@ -1,3 +1,7 @@
+// [FIXED: Translation Hook — Dynamic String Interpolation]
+// [FIXED: VAT Calculation — Rounding & PromptPay Payload]
+// [FIXED: VAT + Discount combo]
+// [FIXED: POS Layout Swap — Minimum Width Guard]
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -7,10 +11,11 @@ import {
   ArrowLeft
 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { useCartStore, useAuthStore, useSettingsStore, useSessionStore } from '../../store'
+import { useCartStore, useAuthStore, useSettingsStore, useSessionStore, useUIStore } from '../../store'
 import type { Product, Category, Customer, CartItem, Promotion } from '../../types'
 import PaymentModal from './PaymentModal'
 import CustomerSearchModal from './CustomerSearchModal'
+import { useTranslation } from '../../hooks/useTranslation'
 
 // Detect electron or browser
 const api = (window as unknown as { api?: unknown }).api as {
@@ -29,6 +34,7 @@ const api = (window as unknown as { api?: unknown }).api as {
 
 export default function POSPage() {
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null)
@@ -38,6 +44,8 @@ export default function POSPage() {
   const [showCustomerSearch, setShowCustomerSearch] = useState(false)
   const [couponCode, setCouponCode] = useState('')
   const [showCouponInput, setShowCouponInput] = useState(false)
+  const [showSwapConfirm, setShowSwapConfirm] = useState(false)
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth)
   const searchRef = useRef<HTMLInputElement>(null)
 
   const {
@@ -49,6 +57,25 @@ export default function POSPage() {
   const { user } = useAuthStore()
   const { settings } = useSettingsStore()
   const { currentSession, setSession } = useSessionStore()
+  const { cartOnRight, setCartOnRight } = useUIStore()
+
+  // [FIXED: POS Layout Swap — Minimum Width Guard]
+  useEffect(() => {
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.contentRect.width
+        setWindowWidth(width)
+        if (width < 1024 && cartOnRight) {
+          setCartOnRight(false)
+        }
+      }
+    })
+    observer.observe(document.body)
+    return () => observer.disconnect()
+  }, [cartOnRight, setCartOnRight])
+
+  const isSwapAllowed = windowWidth >= 1024
+  const activeCartOnRight = isSwapAllowed ? cartOnRight : false
 
   // Session check - Force shift to be open before using POS
   useEffect(() => {
@@ -59,18 +86,18 @@ export default function POSPage() {
           setSession(res.data)
         } else {
           setSession(null)
-          toast.error('กรุณาเปิดกะทำงานก่อนเข้าใช้งานหน้าขาย!', { duration: 4000 })
+          toast.error(t('กรุณาเปิดกะทำงานก่อนเข้าใช้งานหน้าขาย!'), { duration: 4000 })
           navigate('/sessions')
         }
       } else {
         if (!currentSession) {
-          toast.error('กรุณาเปิดกะทำงานก่อนเข้าใช้งานหน้าขาย!', { duration: 4000 })
+          toast.error(t('กรุณาเปิดกะทำงานก่อนเข้าใช้งานหน้าขาย!'), { duration: 4000 })
           navigate('/sessions')
         }
       }
     }
     checkActiveSession()
-  }, [navigate])
+  }, [navigate, t])
 
   // Load data
   useEffect(() => {
@@ -139,9 +166,9 @@ export default function POSPage() {
     const product = products.find(p => p.barcode === barcode || p.sku === barcode)
     if (product) {
       addToCart(product)
-      toast.success(`สแกนบาร์โค้ดสำเร็จ: ${product.name}`)
+      toast.success(t('สแกนบาร์โค้ดสำเร็จ: {{name}}', { name: product.name }))
     } else {
-      toast.error(`ไม่พบสินค้าสำหรับบาร์โค้ด: ${barcode}`)
+      toast.error(t('ไม่พบสินค้าสำหรับบาร์โค้ด: {{barcode}}', { barcode }))
     }
   }
 
@@ -198,7 +225,7 @@ export default function POSPage() {
 
   const addToCart = (product: Product) => {
     if (!product.is_service && product.stock_qty <= 0) {
-      toast.error('สินค้าหมด')
+      toast.error(t('สินค้าหมด'))
       return
     }
     const price = customer?.price_level === 2 ? (product.sell_price2 ?? product.sell_price)
@@ -220,7 +247,7 @@ export default function POSPage() {
       product: product
     }
     addItem(item)
-    toast.success(`เพิ่ม ${product.name}`, { duration: 1200 })
+    toast.success(t('เพิ่ม {{name}}', { name: product.name }), { duration: 1200 })
   }
 
   const applyCoupon = async () => {
@@ -229,7 +256,7 @@ export default function POSPage() {
       if (!api) {
         // Mock coupon
         if (couponCode === 'WELCOME10') {
-          toast.success('ใช้คูปอง WELCOME10 ลด 10%')
+          toast.success(t('ใช้คูปอง WELCOME10 ลด 10%'))
           setCoupon({
             id: 1, name: 'ส่วนลดต้อนรับ', type: 'percent_off', code: 'WELCOME10',
             discount_value: 10, min_purchase: 500, apply_to: 'all',
@@ -237,29 +264,51 @@ export default function POSPage() {
             calculated_discount: getSubtotal() * 0.1
           })
         } else {
-          toast.error('คูปองไม่ถูกต้อง')
+          toast.error(t('คูปองไม่ถูกต้อง'))
         }
         return
       }
       const res = await api.promotions.validate(couponCode, getSubtotal())
       if (res.success && res.data) {
         setCoupon(res.data)
-        toast.success(`ใช้คูปองสำเร็จ ลด ฿${res.data.calculated_discount?.toLocaleString()}`)
+        toast.success(t('ใช้คูปองสำเร็จ ลด {{amount}}', { amount: formatMoney(res.data.calculated_discount ?? 0) }))
         setShowCouponInput(false)
       } else {
-        toast.error(res.error || 'คูปองไม่ถูกต้อง')
+        toast.error(res.error || t('คูปองไม่ถูกต้อง'))
       }
     } catch {
-      toast.error('เกิดข้อผิดพลาด')
+      toast.error(t('เกิดข้อผิดพลาด'))
     }
   }
 
+  // [FIXED: VAT Calculation — Rounding & PromptPay Payload]
+  // [FIXED: VAT + Discount combo]
   const subtotal = getSubtotal()
   const discountAmt = getDiscountAmount()
-  const total = getTotal()
+  const baseAmount = Math.max(subtotal - discountAmt, 0)
+  const vatEnabled = settings.vat_enabled === 'true'
   const vatRate = parseFloat(settings.vat_rate || '7')
   const vatInclusive = settings.vat_inclusive !== 'false'
-  const taxAmount = vatInclusive ? total * (vatRate / (100 + vatRate)) : total * (vatRate / 100)
+
+  let taxAmount = 0
+  let payableTotal = baseAmount
+  let priceExcludingVat = baseAmount
+
+  if (vatEnabled) {
+    if (vatInclusive) {
+      taxAmount = Math.round((baseAmount * (vatRate / (100 + vatRate))) * 100) / 100
+      payableTotal = Math.round(baseAmount * 100) / 100
+      priceExcludingVat = Math.round((baseAmount - taxAmount) * 100) / 100
+    } else {
+      taxAmount = Math.round((baseAmount * (vatRate / 100)) * 100) / 100
+      payableTotal = Math.round((baseAmount + taxAmount) * 100) / 100
+      priceExcludingVat = Math.round(baseAmount * 100) / 100
+    }
+  } else {
+    taxAmount = 0
+    payableTotal = Math.round(baseAmount * 100) / 100
+    priceExcludingVat = Math.round(baseAmount * 100) / 100
+  }
 
   const formatMoney = (n: number) => `฿${n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
@@ -267,16 +316,50 @@ export default function POSPage() {
     <div style={{
       height: '100vh',
       display: 'flex',
+      flexDirection: activeCartOnRight ? 'row-reverse' : 'row',
       background: 'linear-gradient(135deg, #08090e 0%, #0a0d14 50%, #080e0b 100%)',
       fontFamily: 'Sarabun, sans-serif',
       overflow: 'hidden',
+      position: 'relative',
     }}>
+
+      {/* [FIXED: POS Layout Swap — Minimum Width Guard] */}
+      {isSwapAllowed && (
+        <div style={{
+          position: 'absolute',
+          left: activeCartOnRight ? '45%' : '55%',
+          top: '50%',
+          transform: 'translate(-50%, -50%)',
+          zIndex: 100,
+        }}>
+          <button
+            onClick={() => setShowSwapConfirm(true)}
+            style={{
+              width: 32, height: 32,
+              borderRadius: '50%',
+              background: 'rgba(15, 23, 42, 0.9)',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              color: '#22c55e',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+              transition: 'all 0.2s',
+            }}
+            title={t('สลับฝั่งหน้าต่าง (Swap Sides)')}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* ===== LEFT: Cart (55%) ===== */}
       <div style={{
         width: '55%', height: '100%',
         display: 'flex', flexDirection: 'column',
-        borderRight: '1px solid rgba(255,255,255,0.06)',
+        borderRight: activeCartOnRight ? 'none' : '1px solid rgba(255,255,255,0.06)',
+        borderLeft: activeCartOnRight ? '1px solid rgba(255,255,255,0.06)' : 'none',
       }}>
         {/* Cart Header */}
         <div style={{
@@ -309,7 +392,7 @@ export default function POSPage() {
               e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
               e.currentTarget.style.color = 'rgba(255,255,255,0.7)'
             }}
-            title="กลับหน้าหลัก (Back to Dashboard)"
+            title={t('กลับหน้าหลัก (Back to Dashboard)')}
           >
             <ArrowLeft size={16} />
           </button>
@@ -323,7 +406,7 @@ export default function POSPage() {
             <Zap size={16} color="#000" />
           </div>
           <span style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,0.9)' }}>
-            Make a Deal POS
+            {t('Make a Deal POS')}
           </span>
 
           <div style={{ flex: 1 }} />
@@ -336,18 +419,18 @@ export default function POSPage() {
                   const comPort = settings.cash_drawer_port || 'COM1'
                   const res = await (window as any).api.hardware.openDrawer(comPort)
                   if (res.success) {
-                    toast.success('เปิดลิ้นชักเงินสด (Manual) สำเร็จ')
+                    toast.success(t('เปิดลิ้นชักเงินสด (Manual) สำเร็จ'))
                   } else {
-                    toast.error(`เปิดลิ้นชักล้มเหลว: ${res.error}`)
+                    toast.error(t('เปิดลิ้นชักล้มเหลว: {{error}}', { error: res.error }))
                   }
                 } catch (e) {
-                  toast.error(`ข้อผิดพลาดฮาร์ดแวร์: ${String(e)}`)
+                  toast.error(t('ข้อผิดพลาดฮาร์ดแวร์: {{error}}', { error: String(e) }))
                 }
               }}
               className="px-3 py-1.5 bg-amber-950/40 border border-amber-500/30 hover:border-amber-500 text-amber-500 hover:text-amber-400 hover:bg-amber-950/60 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all duration-200 shadow-md shadow-amber-950/20"
             >
               <Zap size={12} />
-              เปิดลิ้นชักเงินสด
+              {t('เปิดลิ้นชักเงินสด')}
             </button>
           )}
 
@@ -366,13 +449,13 @@ export default function POSPage() {
             }}
           >
             <UserPlus size={13} />
-            {customer ? customer.name : 'เลือกลูกค้า'}
-            {customer && <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 10 }}>✦{customer.points.toLocaleString()}</span>}
+            {customer ? customer.name : t('เลือกลูกค้า')}
+            {customer && <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 10 }}>✦{customer.points.toLocaleString()} {t('แต้ม')}</span>}
           </button>
 
           {/* Hold / Clear */}
           <button
-            onClick={() => { clearCart(); toast('ล้างตะกร้าแล้ว') }}
+            onClick={() => { clearCart(); toast(t('ล้างตะกร้าแล้ว')) }}
             style={{
               padding: '6px 10px', background: 'rgba(239,68,68,0.08)',
               border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8,
@@ -381,7 +464,7 @@ export default function POSPage() {
             }}
           >
             <RotateCcw size={13} />
-            ล้าง
+            {t('ล้าง')}
           </button>
         </div>
 
@@ -394,8 +477,8 @@ export default function POSPage() {
               color: 'rgba(255,255,255,0.2)',
             }}>
               <ShoppingBag size={48} strokeWidth={1} />
-              <p style={{ fontSize: 14, margin: 0 }}>ตะกร้าว่าง · สแกนหรือเลือกสินค้า</p>
-              <p style={{ fontSize: 12, margin: 0, color: 'rgba(255,255,255,0.15)' }}>F1 = ค้นหา · F2 = ชำระเงิน</p>
+              <p style={{ fontSize: 14, margin: 0 }}>{t('ตะกร้าว่าง · สแกนหรือเลือกสินค้า')}</p>
+              <p style={{ fontSize: 12, margin: 0, color: 'rgba(255,255,255,0.15)' }}>F1 = Search · F2 = Pay</p>
             </div>
           ) : (
             <div style={{ paddingTop: 8 }}>
@@ -422,14 +505,14 @@ export default function POSPage() {
         }}>
           {/* Subtotal row */}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-            <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>รวม ({items.length} รายการ)</span>
+            <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>{t('สินค้า {{count}} รายการ', { count: items.length })}</span>
             <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>{formatMoney(subtotal)}</span>
           </div>
 
           {/* Discount */}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>ส่วนลด</span>
+              <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>{t('ส่วนลด')}</span>
               <div style={{ display: 'flex', gap: 4 }}>
                 <input
                   value={discount || ''}
@@ -478,7 +561,7 @@ export default function POSPage() {
                     value={couponCode}
                     onChange={e => setCouponCode(e.target.value.toUpperCase())}
                     onKeyDown={e => e.key === 'Enter' && applyCoupon()}
-                    placeholder="คูปองโค้ด"
+                    placeholder={t('คูปองโค้ด')}
                     style={{
                       flex: 1, padding: '4px 10px', fontSize: 12,
                       background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
@@ -487,7 +570,7 @@ export default function POSPage() {
                   />
                   <button onClick={applyCoupon}
                     style={{ padding: '4px 10px', background: '#22c55e', border: 'none', borderRadius: 6, color: '#000', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>
-                    ใช้
+                    {t('ใช้')}
                   </button>
                   <button onClick={() => setShowCouponInput(false)}
                     style={{ padding: '4px 6px', background: 'rgba(255,255,255,0.06)', border: 'none', borderRadius: 6, cursor: 'pointer', color: 'rgba(255,255,255,0.4)' }}>
@@ -497,36 +580,48 @@ export default function POSPage() {
               ) : (
                 <button onClick={() => setShowCouponInput(true)}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(139,92,246,0.7)', fontSize: 12, padding: 0, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Tag size={12} /> ใช้คูปอง
+                  <Tag size={12} /> {t('ใช้คูปอง')}
                 </button>
               )}
             </div>
           )}
 
-          {/* VAT */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-            <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>
-              VAT {vatRate}% ({vatInclusive ? 'รวมใน' : 'แยก'})
-            </span>
-            <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>{formatMoney(taxAmount)}</span>
-          </div>
+          {/* [FIXED: VAT Calculation — Rounding & PromptPay Payload] */}
+          {vatEnabled && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>
+                  {t('ราคายังไม่รวม VAT')}
+                </span>
+                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>{formatMoney(priceExcludingVat)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>
+                  {t('ภาษีมูลค่าเพิ่ม')} VAT {vatRate}%
+                </span>
+                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>{formatMoney(taxAmount)}</span>
+              </div>
+            </>
+          )}
 
           {/* Total + Pay Button */}
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 2 }}>ยอดสุทธิ</div>
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 2 }}>
+                {vatEnabled ? t('ยอดสุทธิ (รวม VAT)') : t('ยอดสุทธิ')}
+              </div>
               <div style={{
                 fontSize: 28, fontWeight: 800,
                 background: 'linear-gradient(135deg, #22c55e, #4ade80)',
                 WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
                 lineHeight: 1,
               }}>
-                {formatMoney(total)}
+                {formatMoney(payableTotal)}
               </div>
             </div>
             <button
               onClick={() => {
-                if (items.length === 0) { toast.error('กรุณาเพิ่มสินค้าก่อน'); return }
+                if (items.length === 0) { toast.error(t('กรุณาเพิ่มสินค้าก่อน')); return }
                 setShowPayment(true)
               }}
               style={{
@@ -543,7 +638,7 @@ export default function POSPage() {
               onMouseLeave={e => (e.currentTarget.style.transform = 'translateY(0)')}
             >
               <CreditCard size={18} />
-              ชำระเงิน
+              {t('ชำระเงิน')}
             </button>
           </div>
         </div>
@@ -564,7 +659,7 @@ export default function POSPage() {
               className="glass-input"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="ค้นหาสินค้า บาร์โค้ด หรือ SKU... (F1)"
+              placeholder={t('ค้นหาสินค้า บาร์โค้ด หรือ SKU... (F1)')}
               style={{ paddingLeft: 38, paddingRight: searchQuery ? 36 : 14 }}
             />
             {searchQuery && (
@@ -597,7 +692,7 @@ export default function POSPage() {
               border: '1px solid rgba(34,197,94,0.3)',
             } : {}}
           >
-            ทั้งหมด
+            {t('ทั้งหมด')}
           </button>
           {categories.map(cat => (
             <button
@@ -637,7 +732,7 @@ export default function POSPage() {
               padding: '60px 20px', color: 'rgba(255,255,255,0.2)',
             }}>
               <Package size={40} strokeWidth={1} style={{ margin: '0 auto 12px' }} />
-              <p>ไม่พบสินค้า</p>
+              <p>{t('ไม่พบสินค้า')}</p>
             </div>
           )}
         </div>
@@ -649,9 +744,9 @@ export default function POSPage() {
           display: 'flex', gap: 8,
           background: 'rgba(8,10,15,0.5)',
         }}>
-          <QuickPayBtn icon={<Banknote size={14} />} label="เงินสด" color="#22c55e" onClick={() => { if (items.length > 0) setShowPayment(true) }} />
-          <QuickPayBtn icon={<CreditCard size={14} />} label="บัตรเครดิต" color="#3b82f6" onClick={() => { if (items.length > 0) setShowPayment(true) }} />
-          <QuickPayBtn icon={<Smartphone size={14} />} label="QR/โอน" color="#8b5cf6" onClick={() => { if (items.length > 0) setShowPayment(true) }} />
+          <QuickPayBtn icon={<Banknote size={14} />} label={t('เงินสด')} color="#22c55e" onClick={() => { if (items.length > 0) setShowPayment(true) }} />
+          <QuickPayBtn icon={<CreditCard size={14} />} label={t('บัตรเครดิต')} color="#3b82f6" onClick={() => { if (items.length > 0) setShowPayment(true) }} />
+          <QuickPayBtn icon={<Smartphone size={14} />} label={t('QR/โอน')} color="#8b5cf6" onClick={() => { if (items.length > 0) setShowPayment(true) }} />
         </div>
       </div>
 
@@ -661,31 +756,16 @@ export default function POSPage() {
           items={items}
           subtotal={subtotal}
           discountAmount={discountAmt}
-          total={total}
+          total={payableTotal}
           taxAmount={taxAmount}
           customer={customer}
           couponCode={coupon?.code}
           userId={user?.id}
           onClose={() => setShowPayment(false)}
-          onSuccess={async () => {
-            // Safe hardware cash drawer activation
-            if (settings.cash_drawer_enabled === 'true') {
-              try {
-                const comPort = settings.cash_drawer_port || 'COM1'
-                const res = await (window as any).api.hardware.openDrawer(comPort)
-                if (res.success) {
-                  toast.success('เปิดลิ้นชักเก็บเงินอัตโนมัติสำเร็จ')
-                } else {
-                  toast.error(`เปิดลิ้นชักเก็บเงินล้มเหลว: ${res.error}`)
-                }
-              } catch (err) {
-                console.error('Cash drawer hardware trigger failed:', err)
-                toast.error('ฮาร์ดแวร์เปิดลิ้นชักเก็บเงินเกิดข้อผิดพลาด')
-              }
-            }
+          onSuccess={() => {
             clearCart()
             setShowPayment(false)
-            toast.success('ชำระเงินสำเร็จ! 🎉', { duration: 3000 })
+            toast.success(t('ชำระเงินสำเร็จ! 🎉'), { duration: 3000 })
           }}
         />
       )}
@@ -695,10 +775,44 @@ export default function POSPage() {
           onSelect={(c) => {
             setCustomer(c)
             setShowCustomerSearch(false)
-            toast.success(`เลือกลูกค้า: ${c.name}`)
+            toast.success(t('เลือกลูกค้า: {{name}}', { name: c.name }))
           }}
           onClose={() => setShowCustomerSearch(false)}
         />
+      )}
+
+      {/* [FIXED: POS Layout Swap — Minimum Width Guard] */}
+      {showSwapConfirm && (
+        <div className="modal-overlay" style={{ zIndex: 1000 }} onClick={() => setShowSwapConfirm(false)}>
+          <div className="modal-content" style={{ width: 320, padding: 24, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 12 }}>
+              {t('ยืนยันการสลับฝั่งหน้าต่าง?')}
+            </h3>
+            <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', marginBottom: 20 }}>
+              {t('คุณต้องการสลับหน้ารวมรายการสินค้าไปอีกฝั่งใช่หรือไม่?')}
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+              <button
+                onClick={() => setShowSwapConfirm(false)}
+                className="glass-btn"
+                style={{ padding: '8px 16px', fontSize: 13 }}
+              >
+                {t('ปฏิเสธ')}
+              </button>
+              <button
+                onClick={() => {
+                  setCartOnRight(!cartOnRight)
+                  setShowSwapConfirm(false)
+                  toast.success(t('สลับฝั่งหน้าต่างเรียบร้อย'))
+                }}
+                className="glass-btn btn-primary"
+                style={{ padding: '8px 16px', fontSize: 13, fontWeight: 700 }}
+              >
+                {t('ยืนยัน')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -782,6 +896,7 @@ function ProductCard({ product, onAdd, formatMoney }: {
   onAdd: () => void
   formatMoney: (n: number) => string
 }) {
+  const { t } = useTranslation()
   const outOfStock = !product.is_service && product.stock_qty <= 0
 
   return (
@@ -837,7 +952,7 @@ function ProductCard({ product, onAdd, formatMoney }: {
         <div style={{
           fontSize: 10, color: product.stock_qty <= product.min_stock ? '#fca5a5' : 'rgba(255,255,255,0.3)',
         }}>
-          {outOfStock ? 'หมด' : `เหลือ ${product.stock_qty} ${product.unit}`}
+          {outOfStock ? t('หมด') : t('เหลือ {{qty}} {{unit}}', { qty: product.stock_qty, unit: product.unit })}
         </div>
       )}
 

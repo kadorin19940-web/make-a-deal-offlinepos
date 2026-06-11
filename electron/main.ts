@@ -227,7 +227,7 @@ app.whenReady().then(() => {
     })
   })
 
-  // Hardware Cash Drawer Integration via SerialPort (Standard 9600 baud open/pulse/close)
+  // [FIXED: Cash Drawer IPC — Fire-and-Forget with Timeout Guard]
   ipcMain.handle('hardware:open-drawer', async (_, comPort: string) => {
     try {
       // Dynamic import to prevent app boot crashes if native module compilation fails
@@ -241,7 +241,10 @@ app.whenReady().then(() => {
       return new Promise((resolve) => {
         port.open((err: any) => {
           if (err) {
-            resolve({ success: false, error: `Failed to open port: ${String(err)}` })
+            resolve({
+              success: false,
+              error: `ไม่พบอุปกรณ์ลิ้นชักเก็บเงินที่พอร์ต ${comPort} หรือไม่ได้ต่อสายสัญญาณ กรุณาตรวจสอบการเชื่อมต่อ USB/RJ11 และการตั้งค่าพอร์ต COM`
+            })
             return
           }
 
@@ -250,7 +253,7 @@ app.whenReady().then(() => {
             // CRITICAL: Close the port immediately to avoid "Port Busy" resource leaks
             port.close(() => {
               if (writeErr) {
-                resolve({ success: false, error: `Write failed: ${String(writeErr)}` })
+                resolve({ success: false, error: `ส่งคำสั่งเปิดลิ้นชักไม่สำเร็จ: ${String(writeErr)}` })
               } else {
                 resolve({ success: true })
               }
@@ -259,7 +262,10 @@ app.whenReady().then(() => {
         })
       })
     } catch (error) {
-      return { success: false, error: `Hardware driver error: ${String(error)}` }
+      return {
+        success: false,
+        error: `ไม่พบอุปกรณ์ลิ้นชักเก็บเงิน (SerialPort Driver) กรุณาตรวจสอบการเชื่อมต่อสายสัญญาณ หรือพอร์ตการเชื่อมต่อในการตั้งค่าระบบ`
+      }
     }
   })
 
@@ -454,15 +460,44 @@ app.on('window-all-closed', () => {
   }
 })
 
+// [FIXED: Receipt Reprint — Date Formatter Must Use Stored Timestamp]
+// Helper function to format receipt date matching language B.E./C.E. and custom formats
+function formatReceiptDate(dateStr: string, settings: any): string {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  if (isNaN(date.getTime())) return dateStr
+
+  const lang = settings.language || 'th'
+  const template = settings.date_format || 'dd/MM/yyyy'
+
+  const day = String(date.getDate()).padStart(2, '0')
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  let year = date.getFullYear()
+  if (lang === 'th') {
+    year += 543
+  }
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+
+  let formattedDate = template
+    .replace('dd', day)
+    .replace('MM', month)
+    .replace('yyyy', String(year))
+    .replace('yy', String(year).slice(-2))
+
+  return `${formattedDate} ${hours}:${minutes}`
+}
+
 function generateReceiptHtml(saleData: any, settings: any): string {
+  // [FIXED: Receipt Printer Layout Limits & VAT Details]
   const is80mm = settings.printer_size === '80mm'
-  const widthStyle = is80mm ? 'width: 80mm; max-width: 80mm;' : 'width: 58mm; max-width: 58mm;'
+  const widthStyle = is80mm ? 'width: 72mm; max-width: 72mm;' : 'width: 48mm; max-width: 48mm;'
   
   const itemsHtml = (saleData.items || []).map((item: any) => {
     const totalItemPrice = item.qty * item.unit_price - (item.discount_amount || 0)
     return `
       <tr style="font-size: 11px;">
-        <td style="padding: 3px 0; word-break: break-all;">
+        <td style="padding: 3px 0; word-break: break-word; white-space: normal;">
           ${item.product_name}
           ${item.discount_amount > 0 ? `<br/><span style="font-size: 9px; color: #555;">(ลด ฿${item.discount_amount.toLocaleString('th-TH')})</span>` : ''}
         </td>
@@ -472,9 +507,15 @@ function generateReceiptHtml(saleData: any, settings: any): string {
     `
   }).join('')
 
-  const saleDateStr = saleData.sale_date 
-    ? new Date(saleData.sale_date).toLocaleString('th-TH') 
-    : new Date().toLocaleString('th-TH')
+  // [FIXED: Receipt Reprint — Date Formatter Must Use Stored Timestamp]
+  const originalDateStr = saleData.sale_date || saleData.created_at
+  const saleDateStr = formatReceiptDate(originalDateStr, settings)
+
+  const vatEnabled = settings.vat_enabled === 'true'
+  const vatRate = settings.vat_rate || '7'
+  const taxAmount = Number(saleData.tax_amount) || 0
+  const totalAmount = Number(saleData.total) || 0
+  const priceBeforeVat = totalAmount - taxAmount
 
   return `
     <!DOCTYPE html>
@@ -489,18 +530,19 @@ function generateReceiptHtml(saleData: any, settings: any): string {
           color: #000;
           background: #fff;
           margin: 0;
-          padding: 6px;
+          padding: 4px;
           ${widthStyle}
-          font-size: 12px;
+          font-size: 11px;
           line-height: 1.3;
+          word-wrap: break-word;
         }
         .text-center { text-align: center; }
         .text-right { text-align: right; }
         .divider { border-top: 1px dashed #000; margin: 6px 0; }
         .bold { font-weight: bold; }
-        .title { font-size: 15px; font-weight: bold; margin-bottom: 2px; }
+        .title { font-size: 14px; font-weight: bold; margin-bottom: 2px; }
         .subtitle { font-size: 10px; color: #333; margin-bottom: 2px; }
-        table { width: 100%; border-collapse: collapse; }
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; word-break: break-word; }
       </style>
     </head>
     <body>
@@ -514,21 +556,21 @@ function generateReceiptHtml(saleData: any, settings: any): string {
       
       <div class="divider"></div>
       
-      <table style="font-size: 10px;">
+      <table style="font-size: 10px; table-layout: fixed;">
         <tr>
-          <td>เลขที่บิล: ${saleData.receipt_no}</td>
-          <td class="text-right">${saleDateStr}</td>
+          <td style="width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">เลขที่บิล: ${saleData.receipt_no}</td>
+          <td class="text-right" style="width: 45%;">${saleDateStr}</td>
         </tr>
       </table>
       
       <div class="divider"></div>
       
-      <table>
+      <table style="width: 100%; table-layout: fixed;">
         <thead>
           <tr style="font-size: 10px; font-weight: bold; border-bottom: 1px dashed #000;">
-            <th style="text-align: left; padding: 2px 0;">รายการ</th>
-            <th style="text-align: center; padding: 2px 0; width: 40px;">จำนวน</th>
-            <th style="text-align: right; padding: 2px 0; width: 70px;">รวม</th>
+            <th style="text-align: left; padding: 2px 0; width: 60%;">รายการ</th>
+            <th style="text-align: center; padding: 2px 0; width: 15%;">จำนวน</th>
+            <th style="text-align: right; padding: 2px 0; width: 25%;">รวม</th>
           </tr>
         </thead>
         <tbody>
@@ -538,19 +580,31 @@ function generateReceiptHtml(saleData: any, settings: any): string {
       
       <div class="divider"></div>
       
-      <table class="bold" style="font-size: 11px;">
+      <table class="bold" style="font-size: 11px; table-layout: fixed;">
         <tr>
-          <td>ยอดรวมสุทธิ</td>
-          <td class="text-right">฿${saleData.subtotal.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</td>
+          <td style="width: 60%;">ยอดรวมสุทธิ (Subtotal)</td>
+          <td class="text-right" style="width: 40%;">฿${saleData.subtotal.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</td>
         </tr>
         ${saleData.discount_amount > 0 ? `
           <tr style="font-size: 10px; font-weight: normal;">
-            <td>ส่วนลดพิเศษ</td>
+            <td>ส่วนลดพิเศษ (Discount)</td>
             <td class="text-right">-฿${saleData.discount_amount.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</td>
           </tr>
         ` : ''}
-        <tr style="font-size: 12px;">
-          <td>ยอดรวมทั้งสิ้น</td>
+        
+        ${vatEnabled ? `
+          <tr style="font-size: 10px; font-weight: normal;">
+            <td>ราคาก่อนภาษี (Excl. VAT)</td>
+            <td class="text-right">฿${priceBeforeVat.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          </tr>
+          <tr style="font-size: 10px; font-weight: normal;">
+            <td>ภาษีมูลค่าเพิ่ม VAT (${vatRate}%)</td>
+            <td class="text-right">฿${taxAmount.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          </tr>
+        ` : ''}
+
+        <tr style="font-size: 12px; border-top: 1px dashed #000; border-bottom: 1px dashed #000;">
+          <td>ยอดรวมทั้งสิ้น (Total)</td>
           <td class="text-right">฿${saleData.total.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</td>
         </tr>
         <tr style="font-size: 10px; font-weight: normal;">
@@ -563,7 +617,7 @@ function generateReceiptHtml(saleData: any, settings: any): string {
         </tr>
         ${saleData.payment_method === 'cash' ? `
           <tr style="font-size: 11px;">
-            <td>เงินทอน</td>
+            <td>เงินทอน (Change)</td>
             <td class="text-right">฿${saleData.change_amount.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</td>
           </tr>
         ` : ''}

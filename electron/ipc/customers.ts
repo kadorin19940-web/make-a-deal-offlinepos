@@ -443,6 +443,7 @@ export function registerReportHandlers(db: Database.Database) {
   })
 
   // Advanced Export to Excel with Date Range Filter and Anti-Memory Leak protection
+  // [FIXED: Excel Export — Deleted Product Handling]
   ipcMain.handle('reports:exportSalesExcel', async (_, filters: { from_date: string; to_date: string; filePath: string; userId: number }) => {
     try {
       if (!checkAdminOrManager(db, filters.userId)) {
@@ -457,10 +458,16 @@ export function registerReportHandlers(db: Database.Database) {
         "ID",
         "เลขที่ใบเสร็จ",
         "วันที่-เวลา",
+        "รหัสสินค้า (Barcode/SKU)",
+        "ชื่อสินค้า",
+        "จำนวน",
+        "หน่วย",
+        "ราคาต่อหน่วย (บาท)",
+        "ยอดรวมสินค้า (บาท)",
         "ชื่อลูกค้า",
         "แคชเชียร์",
-        "ยอดรวมก่อนส่วนลด (บาท)",
-        "ส่วนลด (บาท)",
+        "ยอดรวมก่อนส่วนลดบิล (บาท)",
+        "ส่วนลดท้ายบิล (บาท)",
         "ภาษี (บาท)",
         "ยอดสุทธิรวม (บาท)",
         "วิธีชำระเงิน",
@@ -475,33 +482,53 @@ export function registerReportHandlers(db: Database.Database) {
       const limit = 1000
 
       while (true) {
+        // RECOMMENDATION: Store a snapshot of product_name and barcode directly in sale_items at time of sale, so exports are never dependent on the products table.
         const rows = db.prepare(`
           SELECT s.id, s.receipt_no, s.sale_date, c.name as customer_name, u.name as cashier_name,
-                 s.subtotal, s.discount_amount, s.tax_amount, s.total, s.payment_method, s.status, s.note
+                 s.subtotal, s.discount_amount, s.tax_amount, s.total, s.payment_method, s.status, s.note,
+                 si.qty, si.unit, si.unit_price, si.total as item_total,
+                 p.name as product_name, p.barcode as product_barcode, p.sku as product_sku
           FROM sales s
+          LEFT JOIN sale_items si ON s.id = si.sale_id
+          LEFT JOIN products p ON si.product_id = p.id
           LEFT JOIN customers c ON s.customer_id = c.id
           LEFT JOIN users u ON s.user_id = u.id
           WHERE DATE(s.sale_date) BETWEEN ? AND ?
-          ORDER BY s.id ASC
+          ORDER BY s.id ASC, si.id ASC
           LIMIT ? OFFSET ?
         `).all(from_date, to_date, limit, offset) as any[]
 
         if (rows.length === 0) break
 
-        const mapped = rows.map(r => [
-          r.id,
-          r.receipt_no,
-          r.sale_date,
-          r.customer_name || 'ลูกค้าทั่วไป',
-          r.cashier_name || 'ไม่ระบุ',
-          Number(r.subtotal) || 0,
-          Number(r.discount_amount) || 0,
-          Number(r.tax_amount) || 0,
-          Number(r.total) || 0,
-          r.payment_method,
-          r.status === 'completed' ? 'เสร็จสิ้น' : 'ยกเลิก',
-          r.note || ''
-        ])
+        const mapped = rows.map(r => {
+          // If products.name IS NULL -> display "(สินค้าถูกลบออกจากระบบ)"
+          const pName = r.product_name || '(สินค้าถูกลบออกจากระบบ)'
+          // If products.barcode IS NULL -> display "-"
+          const pBarcode = r.product_barcode || r.product_sku || '-'
+
+          return [
+            r.id,
+            r.receipt_no,
+            r.sale_date,
+            pBarcode,
+            pName,
+            Number(r.qty) || 0,
+            r.unit || 'ชิ้น',
+            Number(r.unit_price) || 0,
+            Number(r.item_total) || 0,
+            r.customer_name || 'ลูกค้าทั่วไป',
+            r.cashier_name || 'ไม่ระบุ',
+            Number(r.subtotal) || 0,
+            Number(r.discount_amount) || 0,
+            Number(r.tax_amount) || 0,
+            Number(r.total) || 0,
+            r.payment_method === 'cash' ? 'เงินสด' : 
+              r.payment_method === 'card' ? 'บัตรเครดิต' : 
+              r.payment_method === 'transfer' ? 'โอนเงิน' : 'QR PromptPay',
+            r.status === 'completed' ? 'เสร็จสิ้น' : 'ยกเลิก',
+            r.note || ''
+          ]
+        })
 
         XLSX.utils.sheet_add_aoa(ws, mapped, { origin: `A${rowCount + 1}` })
         rowCount += rows.length

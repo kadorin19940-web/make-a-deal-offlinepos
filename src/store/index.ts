@@ -226,11 +226,14 @@ export const useCartStore = create<CartState>((set, get) => ({
 }))
 
 // ============ UI Store ============
+// [FIXED: POS Layout Swap — Minimum Width Guard]
 interface UIState {
   sidebarOpen: boolean
   theme: 'dark' | 'light'
+  cartOnRight: boolean
   setSidebarOpen: (open: boolean) => void
   toggleTheme: () => void
+  setCartOnRight: (val: boolean) => void
 }
 
 export const useUIStore = create<UIState>()(
@@ -238,8 +241,10 @@ export const useUIStore = create<UIState>()(
     (set) => ({
       sidebarOpen: true,
       theme: 'dark',
+      cartOnRight: false,
       setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
       toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+      setCartOnRight: (cartOnRight) => set({ cartOnRight }),
     }),
     { name: 'ui-store' }
   )

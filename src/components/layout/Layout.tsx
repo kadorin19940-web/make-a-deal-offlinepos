@@ -1,19 +1,20 @@
+// [FIXED: Translation Hook — Dynamic String Interpolation]
+// [FIXED: Receipt Reprint — Date Formatter Must Use Stored Timestamp]
 import { useLocation } from 'react-router-dom'
 import Sidebar from './Sidebar'
-import { Clock, Search } from 'lucide-react'
+import { Clock } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { format } from 'date-fns'
-import { th } from 'date-fns/locale'
+import { useTranslation, formatAppDate } from '../../hooks/useTranslation'
 
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'แดชบอร์ด',
   '/pos': 'หน้าขาย',
-  '/products': 'จัดการสินค้า',
+  '/products': 'สินค้า',
   '/inventory': 'คลังสินค้า',
   '/customers': 'ลูกค้า',
   '/suppliers': 'ซัพพลายเออร์',
   '/reports': 'รายงาน',
-  '/promotions': 'โปรโมชันและคูปอง',
+  '/promotions': 'โปรโมชัน',
   '/sessions': 'เปิด-ปิดกะ',
   '/settings': 'ตั้งค่า',
 }
@@ -24,6 +25,7 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   const location = useLocation()
+  const { t } = useTranslation()
   const isPOS = location.pathname === '/pos'
   const [time, setTime] = useState(new Date())
 
@@ -32,9 +34,12 @@ export default function Layout({ children }: LayoutProps) {
     return () => clearInterval(interval)
   }, [])
 
-  const pageTitle = Object.entries(PAGE_TITLES).find(([path]) =>
+  const pagePath = Object.keys(PAGE_TITLES).find(path =>
     location.pathname.startsWith(path)
-  )?.[1] ?? ''
+  ) || ''
+
+  const rawTitle = PAGE_TITLES[pagePath] ?? ''
+  const pageTitle = t(rawTitle)
 
   if (isPOS) {
     return (
@@ -43,6 +48,10 @@ export default function Layout({ children }: LayoutProps) {
       </div>
     )
   }
+
+  // Format date using B.E./C.E. aware formatAppDate
+  const dateStr = formatAppDate(time, 'dd MMM yyyy')
+  const timeStr = time.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 
   return (
     <div style={{ height: '100vh', display: 'flex', overflow: 'hidden' }}>
@@ -75,10 +84,10 @@ export default function Layout({ children }: LayoutProps) {
           }}>
             <Clock size={13} />
             <span style={{ fontFeatureSettings: '"tnum"' }}>
-              {format(time, 'HH:mm:ss')}
+              {timeStr}
             </span>
             <span style={{ color: 'rgba(255,255,255,0.25)' }}>·</span>
-            <span>{format(time, 'dd MMM yyyy', { locale: th })}</span>
+            <span>{dateStr}</span>
           </div>
         </header>
 

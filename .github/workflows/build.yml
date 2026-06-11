@@ -58,6 +58,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist-releases
           Copy-Item -Path "release\Make-a-Deal-POS-Solo-Windows.zip" -Destination "dist-releases"
+          Copy-Item -Path "release\*.exe" -Destination "dist-releases"
 
       # ========================================================================
       # PHASE 2: SURGICAL CACHE CLEANUP
@@ -92,6 +93,7 @@ jobs:
       - name: Store LAN Zip to Central Directory
         run: |
           Copy-Item -Path "release\Make-a-Deal-POS-LAN-Windows.zip" -Destination "dist-releases"
+          Copy-Item -Path "release\*.exe" -Destination "dist-releases"
 
       # ========================================================================
       # PHASE 4: UPLOAD & RELEASE ARTIFACTS
@@ -100,21 +102,27 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Make-a-Deal-POS-Solo-Windows-Installer
-          path: dist-releases/Make-a-Deal-POS-Solo-Windows.zip
+          path: |
+            dist-releases/Make-a-Deal-POS-Solo-Windows.zip
+            dist-releases/Make-a-Deal-POS-Solo-Setup-*.exe
           retention-days: 30
 
       - name: Upload LAN Installer Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Make-a-Deal-POS-LAN-Windows-Installer
-          path: dist-releases/Make-a-Deal-POS-LAN-Windows.zip
+          path: |
+            dist-releases/Make-a-Deal-POS-LAN-Windows.zip
+            dist-releases/Make-a-Deal-POS-LAN-Setup-*.exe
           retention-days: 30
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist-releases/*.zip
+          files: |
+            dist-releases/*.zip
+            dist-releases/*.exe
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

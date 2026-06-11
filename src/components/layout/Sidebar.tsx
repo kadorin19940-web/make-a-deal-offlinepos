@@ -1,29 +1,31 @@
+// [FIXED: Translation Hook — Dynamic String Interpolation]
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, ShoppingCart, Package, Warehouse,
   Users, Truck, BarChart2, Tag, DollarSign, Settings,
-  Zap, LogOut, Lock, ChevronLeft, ChevronRight,
-  Bell
+  Zap, LogOut, Lock, ChevronLeft, ChevronRight
 } from 'lucide-react'
 import { useAuthStore, useUIStore, useSessionStore } from '../../store'
 import toast from 'react-hot-toast'
+import { useTranslation } from '../../hooks/useTranslation'
 
 const NAV_ITEMS = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', labelTh: 'แดชบอร์ด' },
-  { to: '/pos', icon: ShoppingCart, label: 'POS', labelTh: 'หน้าขาย', highlight: true, permission: 'sales' },
-  { to: '/products', icon: Package, label: 'Products', labelTh: 'สินค้า', permission: 'products' },
-  { to: '/inventory', icon: Warehouse, label: 'Inventory', labelTh: 'คลังสินค้า', permission: 'inventory' },
-  { to: '/customers', icon: Users, label: 'Customers', labelTh: 'ลูกค้า', permission: 'customers' },
-  { to: '/suppliers', icon: Truck, label: 'Suppliers', labelTh: 'ซัพพลายเออร์', permission: 'inventory' },
-  { to: '/reports', icon: BarChart2, label: 'Reports', labelTh: 'รายงาน', permission: 'reports' },
-  { to: '/promotions', icon: Tag, label: 'Promotions', labelTh: 'โปรโมชัน', permission: 'products' },
-  { to: '/sessions', icon: DollarSign, label: 'Sessions', labelTh: 'เปิด-ปิดกะ', permission: 'sales' },
-  { to: '/settings', icon: Settings, label: 'Settings', labelTh: 'ตั้งค่า', permission: 'settings' },
+  { to: '/dashboard', icon: LayoutDashboard, labelTh: 'แดชบอร์ด' },
+  { to: '/pos', icon: ShoppingCart, labelTh: 'หน้าขาย', highlight: true, permission: 'sales' },
+  { to: '/products', icon: Package, labelTh: 'สินค้า', permission: 'products' },
+  { to: '/inventory', icon: Warehouse, labelTh: 'คลังสินค้า', permission: 'inventory' },
+  { to: '/customers', icon: Users, labelTh: 'ลูกค้า', permission: 'customers' },
+  { to: '/suppliers', icon: Truck, labelTh: 'ซัพพลายเออร์', permission: 'inventory' },
+  { to: '/reports', icon: BarChart2, labelTh: 'รายงาน', permission: 'reports' },
+  { to: '/promotions', icon: Tag, labelTh: 'โปรโมชัน', permission: 'products' },
+  { to: '/sessions', icon: DollarSign, labelTh: 'เปิด-ปิดกะ', permission: 'sales' },
+  { to: '/settings', icon: Settings, labelTh: 'ตั้งค่า', permission: 'settings' },
 ]
 
 export default function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const { user, logout, lock } = useAuthStore()
   const { sidebarOpen, setSidebarOpen } = useUIStore()
   const { currentSession } = useSessionStore()
@@ -94,7 +96,7 @@ export default function Sidebar() {
             animation: 'pulse 2s infinite',
           }} />
           <div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: '#4ade80' }}>กะเปิดอยู่</div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#4ade80' }}>{t('กะเปิดอยู่')}</div>
             <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>
               ฿{currentSession.total_sales.toLocaleString()}
             </div>
@@ -146,12 +148,12 @@ export default function Sidebar() {
                 justifyContent: sidebarOpen ? 'flex-start' : 'center',
                 padding: sidebarOpen ? '9px 12px' : '9px',
               })}
-              title={!sidebarOpen ? item.labelTh : undefined}
+              title={!sidebarOpen ? t(item.labelTh) : undefined}
             >
               <Icon size={17} strokeWidth={isActive ? 2.2 : 1.8} style={{ minWidth: 17 }} />
               {sidebarOpen && (
                 <span style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap' }}>
-                  {item.labelTh}
+                  {t(item.labelTh)}
                 </span>
               )}
             </NavLink>
@@ -177,14 +179,14 @@ export default function Sidebar() {
               {user.name}
             </div>
             <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>
-              {user.role === 'admin' ? 'ผู้ดูแลระบบ' : user.role === 'manager' ? 'ผู้จัดการ' : 'พนักงานขาย'}
+              {user.role === 'admin' ? t('ผู้ดูแลระบบ') : user.role === 'manager' ? t('ผู้จัดการ') : t('พนักงานขาย')}
             </div>
           </div>
         )}
 
         <div style={{ display: 'flex', gap: 6 }}>
           <button
-            onClick={() => { lock(); toast('ล็อกหน้าจอแล้ว') }}
+            onClick={() => { lock(); toast(t('ล็อกหน้าจอแล้ว')) }}
             style={{
               flex: 1, padding: '8px', background: 'none',
               border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8,
@@ -194,16 +196,16 @@ export default function Sidebar() {
             }}
             onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-            title="ล็อกหน้าจอ"
+            title={t('ล็อกหน้าจอ')}
           >
             <Lock size={14} />
-            {sidebarOpen && 'ล็อก'}
+            {sidebarOpen && t('ล็อก')}
           </button>
           <button
             onClick={() => {
               navigate('/dashboard', { replace: true })
               logout()
-              toast('ออกจากระบบแล้ว')
+              toast(t('ออกจากระบบแล้ว'))
             }}
             style={{
               flex: 1, padding: '8px', background: 'none',
@@ -214,10 +216,10 @@ export default function Sidebar() {
             }}
             onMouseEnter={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.08)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-            title="ออกจากระบบ"
+            title={t('ออกจากระบบ')}
           >
             <LogOut size={14} />
-            {sidebarOpen && 'ออก'}
+            {sidebarOpen && t('ออก')}
           </button>
         </div>
       </div>

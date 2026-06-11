@@ -1,9 +1,14 @@
+// [FIXED: Translation Hook — Dynamic String Interpolation]
+// [FIXED: VAT Calculation — Rounding & PromptPay Payload]
+// [FIXED: Cash Drawer IPC — Fire-and-Forget with Timeout Guard]
+// [FIXED: Receipt Reprint — Date Formatter Must Use Stored Timestamp]
 import { useState, useEffect } from 'react'
 import { X, Banknote, CreditCard, Smartphone, Layers, Delete, CheckCircle, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { CartItem, Customer, PaymentMethod } from '../../types'
 import { useSettingsStore } from '../../store'
 import { QRCodeSVG } from 'qrcode.react'
+import { useTranslation } from '../../hooks/useTranslation'
 
 const api = (window as any).api
 
@@ -24,6 +29,7 @@ export default function PaymentModal({
   items, subtotal, discountAmount, total, taxAmount,
   customer, couponCode, userId, onClose, onSuccess
 }: PaymentModalProps) {
+  const { t } = useTranslation()
   const [method, setMethod] = useState<PaymentMethod>('cash')
   const [cashInput, setCashInput] = useState('')
   const [reference, setReference] = useState('')
@@ -35,12 +41,16 @@ export default function PaymentModal({
   const [loyaltyRule, setLoyaltyRule] = useState<any>(null)
   const { settings } = useSettingsStore()
 
-  const pointsVal = pointsToUse * (loyaltyRule?.redeem_per_baht ?? 0.1)
-  const cashAmount = parseFloat(cashInput) || 0
-  const change = method === 'cash' ? Math.max(cashAmount - (total - pointsVal), 0) : 0
-  const shortfall = method === 'cash' && cashAmount > 0 ? Math.max((total - pointsVal) - cashAmount, 0) : 0
+  // [FIXED: VAT Calculation — Rounding & PromptPay Payload]
+  const redeemRate = loyaltyRule?.redeem_per_baht ?? 0.1
+  const pointsVal = Math.round((pointsToUse * redeemRate) * 100) / 100
+  const cashAmount = Math.round((parseFloat(cashInput) || 0) * 100) / 100
+  const netPayable = Math.max(Math.round((total - pointsVal) * 100) / 100, 0)
+  
+  const change = method === 'cash' ? Math.max(Math.round((cashAmount - netPayable) * 100) / 100, 0) : 0
+  const shortfall = method === 'cash' && cashAmount > 0 ? Math.max(Math.round((netPayable - cashAmount) * 100) / 100, 0) : 0
 
-  const QUICK_AMOUNTS = [total - pointsVal, Math.ceil((total - pointsVal) / 100) * 100, Math.ceil((total - pointsVal) / 500) * 500, Math.ceil((total - pointsVal) / 1000) * 1000]
+  const QUICK_AMOUNTS = [netPayable, Math.ceil(netPayable / 100) * 100, Math.ceil(netPayable / 500) * 500, Math.ceil(netPayable / 1000) * 1000]
     .filter((v, i, a) => a.indexOf(v) === i && v > 0).slice(0, 4)
 
   useEffect(() => {
@@ -74,8 +84,8 @@ export default function PaymentModal({
   }
 
   const handlePay = async () => {
-    if (method === 'cash' && cashAmount < total - pointsToUse * 0.1) {
-      toast.error('ยอดรับไม่เพียงพอ')
+    if (method === 'cash' && cashAmount < netPayable) {
+      toast.error(t('ยอดรับไม่เพียงพอ'))
       return
     }
 
@@ -88,9 +98,9 @@ export default function PaymentModal({
         user_id: userId || null,
         subtotal,
         discount_amount: discountAmount,
-        total,
+        total: total, // inclusive total or exclusive total including VAT
         tax_amount: taxAmount,
-        tax_inclusive: 1,
+        tax_inclusive: settings.vat_inclusive !== 'false' ? 1 : 0,
         paid_amount: method === 'cash' ? cashAmount : total,
         change_amount: change,
         payment_method: method,
@@ -98,6 +108,8 @@ export default function PaymentModal({
         coupon_code: couponCode || null,
         points_earned: customer ? Math.floor(total * (loyaltyRule?.earn_per_baht ?? 1)) : 0,
         points_used: pointsToUse,
+        // [FIXED: Receipt Reprint — Date Formatter Must Use Stored Timestamp]
+        sale_date: new Date().toISOString(), 
         items: items.map(item => ({
           product_id: item.product_id,
           variant_id: item.variant_id,
@@ -116,13 +128,32 @@ export default function PaymentModal({
 
       if (api) {
         const res = await api.sales.create(saleData)
-        if (!res.success) { toast.error(res.error || 'เกิดข้อผิดพลาด'); return }
+        if (!res.success) { toast.error(res.error || t('เกิดข้อผิดพลาด')); return }
         
         // Silent Background Google Sheets Sync
         if (api.backup) {
           api.backup.syncGoogleSheets().catch((err: any) => {
             console.error('[Background Sync] Google Sheets sync failed:', err)
           })
+        }
+
+        // [FIXED: Cash Drawer IPC — Fire-and-Forget with Timeout Guard]
+        if (settings.cash_drawer_enabled === 'true' && method === 'cash') {
+          const comPort = settings.cash_drawer_port || 'COM1'
+          const openDrawerPromise = api.hardware.openDrawer(comPort)
+          const timeoutPromise = new Promise<any>((_, reject) =>
+            setTimeout(() => reject(new Error('Cash drawer open timed out')), 3000)
+          )
+
+          Promise.race([openDrawerPromise, timeoutPromise])
+            .then((res) => {
+              if (res && !res.success) {
+                console.warn('Cash drawer open failed (silent):', res.error)
+              }
+            })
+            .catch((err) => {
+              console.warn('Cash drawer fire-and-forget failed or timed out:', err)
+            })
         }
       }
 
@@ -133,24 +164,24 @@ export default function PaymentModal({
       if (api && api.print && settings.auto_print === 'true') {
         api.print.receipt(saleData, settings).then((printRes: any) => {
           if (printRes.success) {
-            toast.success('พิมพ์ใบเสร็จอัตโนมัติสำเร็จ')
+            toast.success(t('พิมพ์ใบเสร็จสำเร็จ'))
           } else {
             console.error('Auto-print failed:', printRes.error)
           }
         }).catch((err: any) => console.error('Auto-print error:', err))
       }
-    } catch {
-      toast.error('เกิดข้อผิดพลาด')
+    } catch (e) {
+      toast.error(t('เกิดข้อผิดพลาด'))
     } finally {
       setLoading(false)
     }
   }
 
   const PAY_METHODS = [
-    { id: 'cash', label: 'เงินสด', icon: <Banknote size={18} />, color: '#22c55e' },
-    { id: 'card', label: 'บัตร', icon: <CreditCard size={18} />, color: '#3b82f6' },
-    { id: 'transfer', label: 'โอน', icon: <Smartphone size={18} />, color: '#8b5cf6' },
-    { id: 'qr', label: 'QR', icon: <Layers size={18} />, color: '#f59e0b' },
+    { id: 'cash', label: t('เงินสด'), icon: <Banknote size={18} />, color: '#22c55e' },
+    { id: 'card', label: t('บัตร'), icon: <CreditCard size={18} />, color: '#3b82f6' },
+    { id: 'transfer', label: t('โอน'), icon: <Smartphone size={18} />, color: '#8b5cf6' },
+    { id: 'qr', label: t('QR'), icon: <Layers size={18} />, color: '#f59e0b' },
   ]
 
   const fmt = (n: number) => `฿${n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -170,7 +201,7 @@ export default function PaymentModal({
               <CheckCircle size={40} color="#22c55e" />
             </div>
             <h2 style={{ color: 'rgba(255,255,255,0.95)', fontSize: 22, fontWeight: 800, margin: '0 0 4px' }}>
-              ชำระเงินสำเร็จ
+              {t('ชำระเงินสำเร็จ')}
             </h2>
             <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 14, margin: '0 0 24px' }}>
               {receiptNo}
@@ -180,47 +211,47 @@ export default function PaymentModal({
               background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
               borderRadius: 12, padding: '16px 20px', marginBottom: 24, textAlign: 'left',
             }}>
-              <Row label="ยอดรวม" value={fmt(total)} />
+              <Row label={t('ยอดรวม')} value={fmt(total)} />
               {method === 'cash' && <>
-                <Row label="รับเงิน" value={fmt(cashAmount)} />
-                <Row label="ทอน" value={fmt(change)} highlight />
+                <Row label={t('รับเงิน')} value={fmt(cashAmount)} />
+                <Row label={t('ทอน')} value={fmt(change)} highlight />
               </>}
-              {customer && <Row label="แต้มที่ได้รับ" value={`+${Math.floor(total)} แต้ม`} color="#fcd34d" />}
+              {customer && <Row label={t('แต้มที่ได้รับ')} value={`+${Math.floor(total)} ${t('แต้ม')}`} color="#fcd34d" />}
             </div>
 
             <div style={{ display: 'flex', gap: 10 }}>
               <button
                 onClick={async () => {
                   if (api && api.print && finalSaleData) {
-                    const printToast = toast.loading('กำลังพิมพ์ใบเสร็จ...')
+                    const printToast = toast.loading(t('กำลังพิมพ์ใบเสร็จ...'))
                     try {
                       const printRes = await api.print.receipt(finalSaleData, settings)
                       toast.dismiss(printToast)
                       if (printRes.success) {
-                        toast.success('พิมพ์ใบเสร็จสำเร็จ')
+                        toast.success(t('พิมพ์ใบเสร็จสำเร็จ'))
                       } else {
-                        toast.error('พิมพ์ล้มเหลว: ' + (printRes.error || 'ไม่พบเครื่องพิมพ์'))
+                        toast.error(t('พิมพ์ล้มเหลว:') + ' ' + (printRes.error || ''))
                       }
                     } catch (err) {
                       toast.dismiss(printToast)
-                      toast.error('เกิดข้อผิดพลาดในการพิมพ์')
+                      toast.error(t('เกิดข้อผิดพลาดในการพิมพ์'))
                     }
                   } else {
-                    toast.success('กำลังจำลองการพิมพ์ใบเสร็จ (Demo)')
+                    toast.success(t('กำลังจำลองการพิมพ์ใบเสร็จ (Demo)'))
                   }
                   setTimeout(onSuccess, 800)
                 }}
                 className="glass-btn btn-secondary"
                 style={{ flex: 1, fontSize: 14 }}
               >
-                <Printer size={15} /> พิมพ์ใบเสร็จ
+                <Printer size={15} /> {t('พิมพ์ใบเสร็จ')}
               </button>
               <button
                 onClick={onSuccess}
                 className="glass-btn btn-primary"
                 style={{ flex: 1, fontSize: 14, fontWeight: 700 }}
               >
-                เสร็จสิ้น
+                {t('เสร็จสิ้น')}
               </button>
             </div>
           </div>
@@ -232,17 +263,17 @@ export default function PaymentModal({
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             }}>
               <div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: 'rgba(255,255,255,0.9)' }}>ชำระเงิน</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: 'rgba(255,255,255,0.9)' }}>{t('ชำระเงิน')}</div>
                 <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>{receiptNo}</div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>ยอดสุทธิ</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>{t('ยอดที่ต้องชำระ')}</div>
                 <div style={{
                   fontSize: 24, fontWeight: 800,
                   background: 'linear-gradient(135deg, #22c55e, #4ade80)',
                   WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
                 }}>
-                  {fmt(total)}
+                  {fmt(netPayable)}
                 </div>
               </div>
               <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.4)', padding: 4 }}>
@@ -282,22 +313,22 @@ export default function PaymentModal({
                     borderRadius: 12, padding: '12px 16px', marginBottom: 12,
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   }}>
-                    <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>รับเงิน</span>
+                    <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>{t('รับเงิน')}</span>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
                       <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>฿</span>
-                      <span style={{ fontSize: 28, fontWeight: 800, color: cashAmount >= total ? '#22c55e' : 'rgba(255,255,255,0.9)' }}>
+                      <span style={{ fontSize: 28, fontWeight: 800, color: cashAmount >= netPayable ? '#22c55e' : 'rgba(255,255,255,0.9)' }}>
                         {cashInput || '0'}
                       </span>
                     </div>
                   </div>
 
-                  {cashInput && cashAmount >= total && (
+                  {cashInput && cashAmount >= netPayable && (
                     <div style={{
                       background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)',
                       borderRadius: 10, padding: '10px 14px', marginBottom: 12,
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     }}>
-                      <span style={{ color: '#4ade80', fontSize: 14, fontWeight: 600 }}>ทอน</span>
+                      <span style={{ color: '#4ade80', fontSize: 14, fontWeight: 600 }}>{t('ทอน')}</span>
                       <span style={{ color: '#4ade80', fontSize: 20, fontWeight: 800 }}>{fmt(change)}</span>
                     </div>
                   )}
@@ -352,25 +383,25 @@ export default function PaymentModal({
               {(method === 'card' || method === 'transfer') && (
                 <div>
                   <div style={{ textAlign: 'center', padding: '20px 0', color: 'rgba(255,255,255,0.6)', fontSize: 14 }}>
-                    {method === 'card' ? 'รูดบัตร / tap' : 'โอนเงิน'}
+                    {method === 'card' ? t('รูดบัตร / tap') : t('โอนเงิน')}
                   </div>
                   <div style={{ marginBottom: 12 }}>
                     <label style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', display: 'block', marginBottom: 6 }}>
-                      เลขอ้างอิง / Ref No.
+                      {t('เลขอ้างอิง / Ref No.')}
                     </label>
                     <input
                       className="glass-input"
                       value={reference}
                       onChange={e => setReference(e.target.value)}
-                      placeholder="กรอกเลขอ้างอิง (ถ้ามี)"
+                      placeholder={t('กรอกเลขอ้างอิง (ถ้ามี)')}
                     />
                   </div>
                   <div style={{
                     background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
                     borderRadius: 12, padding: '16px',  marginBottom: 8, textAlign: 'center',
                   }}>
-                    <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4 }}>ยอดที่ต้องชำระ</div>
-                    <div style={{ fontSize: 28, fontWeight: 800, color: '#22c55e' }}>{fmt(total)}</div>
+                    <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4 }}>{t('ยอดที่ต้องชำระ')}</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: '#22c55e' }}>{fmt(netPayable)}</div>
                   </div>
                 </div>
               )}
@@ -380,7 +411,8 @@ export default function PaymentModal({
                 const promptpayId = settings.promptpay_id || settings.shop_phone || settings.shop_tax_id || '';
                 const cleanId = promptpayId.replace(/\D/g, '');
                 const hasValidPromptPay = cleanId.length >= 9 && cleanId.length <= 15;
-                const payload = hasValidPromptPay ? generatePromptPayPayload(cleanId, total) : '';
+                // [FIXED: VAT Calculation — Rounding & PromptPay Payload]
+                const payload = hasValidPromptPay ? generatePromptPayPayload(cleanId, netPayable) : '';
 
                 return (
                   <div style={{ textAlign: 'center', padding: '16px 0' }}>
@@ -407,14 +439,14 @@ export default function PaymentModal({
                           fontWeight: 600,
                           lineHeight: 1.4
                         }}>
-                          กรุณาตั้งค่าเบอร์พร้อมเพย์<br />ที่เมนูตั้งค่าร้านค้า
+                          {t('กรุณาตั้งค่าเบอร์พร้อมเพย์\nที่เมนูตั้งค่าร้านค้า')}
                         </div>
                       )}
                     </div>
                     <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, marginBottom: 4 }}>
-                      {hasValidPromptPay ? `สแกน QR PromptPay (${promptpayId})` : 'ไม่พบข้อมูลรับเงินพร้อมเพย์'}
+                      {hasValidPromptPay ? t('สแกน QR PromptPay ({{promptpayId}})', { promptpayId }) : t('ไม่พบข้อมูลรับเงินพร้อมเพย์')}
                     </div>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: '#22c55e' }}>{fmt(total)}</div>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: '#22c55e' }}>{fmt(netPayable)}</div>
                   </div>
                 );
               })()}
@@ -427,9 +459,9 @@ export default function PaymentModal({
                   borderRadius: 10, display: 'flex', alignItems: 'center', gap: 10,
                 }}>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12, color: '#fcd34d', fontWeight: 600 }}>ใช้แต้มสะสม</div>
+                    <div style={{ fontSize: 12, color: '#fcd34d', fontWeight: 600 }}>{t('ใช้แต้มสะสม')}</div>
                     <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>
-                      {customer.points.toLocaleString()} แต้ม = ฿{(customer.points * (loyaltyRule?.redeem_per_baht ?? 0.1)).toLocaleString('th-TH', { minimumFractionDigits: 2 })}
+                      {customer.points.toLocaleString()} {t('แต้ม')} = ฿{(customer.points * (loyaltyRule?.redeem_per_baht ?? 0.1)).toLocaleString('th-TH', { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                   <input
@@ -443,7 +475,7 @@ export default function PaymentModal({
                       borderRadius: 6, color: '#fcd34d', outline: 'none',
                     }}
                   />
-                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>แต้ม</span>
+                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>{t('แต้ม')}</span>
                 </div>
               )}
             </div>
@@ -452,7 +484,7 @@ export default function PaymentModal({
             <div style={{ padding: '0 20px 20px' }}>
               <button
                 onClick={handlePay}
-                disabled={loading || (method === 'cash' && cashAmount < total - pointsVal && cashInput !== '')}
+                disabled={loading || (method === 'cash' && cashAmount < netPayable && cashInput !== '')}
                 className="glass-btn btn-primary"
                 style={{ 
                   width: '100%', 
@@ -464,7 +496,7 @@ export default function PaymentModal({
                   transition: 'all 0.2s'
                 }}
               >
-                {loading ? 'กำลังบันทึก...' : `ยืนยันการชำระ ${fmt(total - pointsVal)}`}
+                {loading ? t('กำลังบันทึก...') : t('ยืนยันการชำระ {{total}}', { total: fmt(netPayable) })}
               </button>
             </div>
           </>
@@ -536,6 +568,8 @@ function generatePromptPayPayload(target: string, amount?: number): string {
   ];
 
   if (amount !== undefined && amount > 0) {
+    // [FIXED: VAT Calculation — Rounding & PromptPay Payload]
+    // Ensures exactly 2 decimal places are appended, matching strict payload specs
     const amountStr = amount.toFixed(2);
     payloadSegments.push('54' + String(amountStr.length).padStart(2, '0') + amountStr);
   }
