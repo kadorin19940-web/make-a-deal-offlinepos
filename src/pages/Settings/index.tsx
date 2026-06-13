@@ -10,7 +10,6 @@ import { useSettingsStore, useAuthStore } from '../../store'
 import type { User as UserType } from '../../types'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
-import buildConfig from '../../../public/build-config.json'
 
 const api = (window as any).api
 
@@ -143,6 +142,7 @@ export default function SettingsPage() {
   const [lanPort, setLanPort] = useState(8080)
   const [lanServerActive, setLanServerActive] = useState(false)
   const [localIps, setLocalIps] = useState<string[]>([])
+  const [packageType, setPackageType] = useState<string>('lan')
 
   const handleSyncGoogleSheets = async () => {
     if (!api || !api.backup) {
@@ -235,12 +235,22 @@ export default function SettingsPage() {
     }
   }
 
+  const loadPackageType = async () => {
+    if (api && api.system && api.system.getPackageType) {
+      const res = await api.system.getPackageType()
+      if (res && res.success) {
+        setPackageType(res.data)
+      }
+    }
+  }
+
   // Load settings + users on mount
   useEffect(() => { setLocal({ ...settings }) }, [settings])
   useEffect(() => { 
     loadUsers()
     loadLicenseInfo() 
     loadLANServerInfo()
+    loadPackageType()
   }, [])
 
   const loadLANServerInfo = async () => {
@@ -1257,7 +1267,7 @@ export default function SettingsPage() {
                   position: 'relative',
                   overflow: 'hidden'
                 }}>
-                  {buildConfig.packageType === 'solo' && (
+                  {packageType === 'solo' && (
                     <div className="absolute inset-0 z-50 flex flex-col items-center justify-center backdrop-blur-md bg-slate-950/70 p-6 text-center select-none" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(10, 10, 15, 0.75)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 24, borderRadius: 14 }}>
                       <div style={{
                         background: 'linear-gradient(135deg, #f59e0b, #ef4444)',

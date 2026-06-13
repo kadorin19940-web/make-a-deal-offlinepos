@@ -189,6 +189,7 @@ const api = {
     activateLicense: (licenseKey: string, email: string, hardwareId: string) =>
       ipcRenderer.invoke('system:activate-license', { licenseKey, email, hardwareId }),
     deactivateLicense: () => ipcRenderer.invoke('system:deactivate-license'),
+    getPackageType: () => ipcRenderer.invoke('system:get-package-type'),
   },
 
   // Local LAN Server System

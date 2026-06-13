@@ -434,6 +434,30 @@ app.whenReady().then(() => {
     }
   })
 
+  // 5. Get Package Type — dynamically reads build-config.json from filesystem
+  ipcMain.handle('system:get-package-type', () => {
+    try {
+      const baseDir = app.getAppPath()
+      const pathsToCheck = [
+        path.join(baseDir, 'dist', 'build-config.json'),
+        path.join(baseDir, 'public', 'build-config.json'),
+        path.join(baseDir, 'build-config.json')
+      ]
+      for (const p of pathsToCheck) {
+        if (fs.existsSync(p)) {
+          const raw = fs.readFileSync(p, 'utf8')
+          const config = JSON.parse(raw)
+          if (config && config.packageType) {
+            return { success: true, data: config.packageType }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[System] Error reading package type:', err)
+    }
+    return { success: true, data: 'lan' } // fallback
+  })
+
   // Register custom protocol for local images from userData/images using net.fetch
   protocol.handle('local-img', (request) => {
     try {
