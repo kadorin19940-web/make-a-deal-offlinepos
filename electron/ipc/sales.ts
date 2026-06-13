@@ -114,23 +114,18 @@ export function registerSalesHandlers(db: Database.Database) {
           db.prepare('UPDATE promotions SET usage_count = usage_count + 1 WHERE code = ?').run(data.coupon_code)
         }
 
-        // Update session totals
+        // Update session totals — safely build SET clause
         const session = db.prepare("SELECT id FROM cash_sessions WHERE status = 'open' ORDER BY id DESC LIMIT 1").get() as { id: number } | undefined
         if (session) {
           const paymentMethod = data.payment_method as string
-          let cashField = ''
-          if (paymentMethod === 'cash') cashField = 'cash_sales = cash_sales + @total,'
-          else if (paymentMethod === 'card') cashField = 'card_sales = card_sales + @total,'
-          else if (paymentMethod === 'transfer') cashField = 'transfer_sales = transfer_sales + @total,'
-          else if (paymentMethod === 'qr') cashField = 'qr_sales = qr_sales + @total,'
+          const setClauses: string[] = ['total_sales = total_sales + @total']
+          if (paymentMethod === 'cash') setClauses.push('cash_sales = cash_sales + @total')
+          else if (paymentMethod === 'card') setClauses.push('card_sales = card_sales + @total')
+          else if (paymentMethod === 'transfer') setClauses.push('transfer_sales = transfer_sales + @total')
+          else if (paymentMethod === 'qr') setClauses.push('qr_sales = qr_sales + @total')
 
-          db.prepare(`
-            UPDATE cash_sessions SET 
-              total_sales = total_sales + @total,
-              ${cashField}
-              total_sales = total_sales + @total
-            WHERE id = @sessionId
-          `).run({ total: data.total, sessionId: session.id })
+          db.prepare(`UPDATE cash_sessions SET ${setClauses.join(', ')} WHERE id = @sessionId`)
+            .run({ total: data.total, sessionId: session.id })
         }
 
         return saleId
@@ -343,8 +338,6 @@ export function registerSalesHandlers(db: Database.Database) {
             if (prod && !prod.is_service) {
               const restoredQty = prod.stock_qty + item.qty
               db.prepare('UPDATE products SET stock_qty = ? WHERE id = ?').run(restoredQty, item.product_id)
-              
-              // Record stock movement
               db.prepare(`
                 INSERT INTO stock_movements (product_id, type, qty, qty_before, qty_after, ref_type, ref_id, note)
                 VALUES (?, 'in', ?, ?, ?, 'void', ?, 'ลบใบเสร็จ: คืนยอดขาย')
@@ -356,19 +349,14 @@ export function registerSalesHandlers(db: Database.Database) {
         // 2. Adjust active cash session if open
         const session = db.prepare("SELECT id FROM cash_sessions WHERE status = 'open' ORDER BY id DESC LIMIT 1").get() as any
         if (session) {
-          let paymentField = ''
-          if (sale.payment_method === 'cash') paymentField = 'cash_sales = cash_sales - @total,'
-          else if (sale.payment_method === 'card') paymentField = 'card_sales = card_sales - @total,'
-          else if (sale.payment_method === 'transfer') paymentField = 'transfer_sales = transfer_sales - @total,'
-          else if (sale.payment_method === 'qr') paymentField = 'qr_sales = qr_sales - @total,'
+          const setClausesD: string[] = ['total_sales = total_sales - @total']
+          if (sale.payment_method === 'cash') setClausesD.push('cash_sales = cash_sales - @total')
+          else if (sale.payment_method === 'card') setClausesD.push('card_sales = card_sales - @total')
+          else if (sale.payment_method === 'transfer') setClausesD.push('transfer_sales = transfer_sales - @total')
+          else if (sale.payment_method === 'qr') setClausesD.push('qr_sales = qr_sales - @total')
 
-          db.prepare(`
-            UPDATE cash_sessions 
-            SET total_sales = total_sales - @total,
-                ${paymentField}
-                total_sales = total_sales - @total
-            WHERE id = @sessionId
-          `).run({ total: sale.total, sessionId: session.id })
+          db.prepare(`UPDATE cash_sessions SET ${setClausesD.join(', ')} WHERE id = @sessionId`)
+            .run({ total: sale.total, sessionId: session.id })
         }
 
         // 3. Delete from sales (ON DELETE CASCADE will clear sale_items)
@@ -404,7 +392,6 @@ export function registerSalesHandlers(db: Database.Database) {
             if (prod && !prod.is_service) {
               const restoredQty = prod.stock_qty + item.qty
               db.prepare('UPDATE products SET stock_qty = ? WHERE id = ?').run(restoredQty, item.product_id)
-              
               db.prepare(`
                 INSERT INTO stock_movements (product_id, type, qty, qty_before, qty_after, ref_type, ref_id, note)
                 VALUES (?, 'in', ?, ?, ?, 'void', ?, 'แก้ไขบิล: ยกเลิกยอดเก่า')
@@ -447,7 +434,6 @@ export function registerSalesHandlers(db: Database.Database) {
             const prod = db.prepare('SELECT stock_qty FROM products WHERE id = ?').get(item.product_id) as { stock_qty: number }
             const newQty = prod.stock_qty - item.qty
             db.prepare('UPDATE products SET stock_qty = ? WHERE id = ?').run(newQty, item.product_id)
-            
             db.prepare(`
               INSERT INTO stock_movements (product_id, type, qty, qty_before, qty_after, ref_type, ref_id, note)
               VALUES (?, 'out', ?, ?, ?, 'sale', ?, 'แก้ไขบิล: ยอดใหม่')
@@ -480,43 +466,30 @@ export function registerSalesHandlers(db: Database.Database) {
           payment_method: data.payment_method || 'cash',
           note: data.note || null,
           sale_date: data.sale_date,
-          customer_id: data.customer_id || null
+          customer_id: data.customer_id || null,
         })
 
         // 5. Update cash session totals if there is an active session
-        const session = db.prepare("SELECT id FROM cash_sessions WHERE status = 'open' ORDER BY id DESC LIMIT 1").get() as any
-        if (session) {
-          // Adjust totals: subtract old total, add new total
+        const sessionU = db.prepare("SELECT id FROM cash_sessions WHERE status = 'open' ORDER BY id DESC LIMIT 1").get() as any
+        if (sessionU) {
           const oldSaleTotal = sale.total
-          const diffTotal = data.total - oldSaleTotal
-          
-          let oldPaymentField = ''
-          if (sale.payment_method === 'cash') oldPaymentField = 'cash_sales = cash_sales - @oldTotal,'
-          else if (sale.payment_method === 'card') oldPaymentField = 'card_sales = card_sales - @oldTotal,'
-          else if (sale.payment_method === 'transfer') oldPaymentField = 'transfer_sales = transfer_sales - @oldTotal,'
-          else if (sale.payment_method === 'qr') oldPaymentField = 'qr_sales = qr_sales - @oldTotal,'
 
-          let newPaymentField = ''
-          if (data.payment_method === 'cash') newPaymentField = 'cash_sales = cash_sales + @newTotal,'
-          else if (data.payment_method === 'card') newPaymentField = 'card_sales = card_sales + @newTotal,'
-          else if (data.payment_method === 'transfer') newPaymentField = 'transfer_sales = transfer_sales + @newTotal,'
-          else if (data.payment_method === 'qr') newPaymentField = 'qr_sales = qr_sales + @newTotal,'
+          const oldSetClauses: string[] = ['total_sales = total_sales - @oldTotal']
+          if (sale.payment_method === 'cash') oldSetClauses.push('cash_sales = cash_sales - @oldTotal')
+          else if (sale.payment_method === 'card') oldSetClauses.push('card_sales = card_sales - @oldTotal')
+          else if (sale.payment_method === 'transfer') oldSetClauses.push('transfer_sales = transfer_sales - @oldTotal')
+          else if (sale.payment_method === 'qr') oldSetClauses.push('qr_sales = qr_sales - @oldTotal')
 
-          db.prepare(`
-            UPDATE cash_sessions 
-            SET total_sales = total_sales - @oldTotal,
-                ${oldPaymentField}
-                total_sales = total_sales - @oldTotal
-            WHERE id = @sessionId
-          `).run({ oldTotal: oldSaleTotal, sessionId: session.id })
+          const newSetClauses: string[] = ['total_sales = total_sales + @newTotal']
+          if (data.payment_method === 'cash') newSetClauses.push('cash_sales = cash_sales + @newTotal')
+          else if (data.payment_method === 'card') newSetClauses.push('card_sales = card_sales + @newTotal')
+          else if (data.payment_method === 'transfer') newSetClauses.push('transfer_sales = transfer_sales + @newTotal')
+          else if (data.payment_method === 'qr') newSetClauses.push('qr_sales = qr_sales + @newTotal')
 
-          db.prepare(`
-            UPDATE cash_sessions 
-            SET total_sales = total_sales + @newTotal,
-                ${newPaymentField}
-                total_sales = total_sales + @newTotal
-            WHERE id = @sessionId
-          `).run({ newTotal: data.total, sessionId: session.id })
+          db.prepare(`UPDATE cash_sessions SET ${oldSetClauses.join(', ')} WHERE id = @sessionId`)
+            .run({ oldTotal: oldSaleTotal, sessionId: sessionU.id })
+          db.prepare(`UPDATE cash_sessions SET ${newSetClauses.join(', ')} WHERE id = @sessionId`)
+            .run({ newTotal: data.total, sessionId: sessionU.id })
         }
       })
 

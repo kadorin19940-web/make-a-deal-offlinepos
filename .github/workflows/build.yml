@@ -49,7 +49,15 @@ jobs:
       - name: Bundle Solo Setup and Guides
         run: |
           New-Item -ItemType Directory -Force -Path dist-zip-solo
-          Copy-Item -Path "release\*.exe" -Destination "dist-zip-solo"
+
+          # Copy ONLY the Solo installer .exe (match by name pattern from electron-builder.solo.json)
+          $soloExe = Get-ChildItem -Path "release" -Filter "*Solo*Setup*.exe" | Select-Object -First 1
+          if (-not $soloExe) {
+            # Fallback: copy any .exe in release (solo build only has 1 at this point)
+            $soloExe = Get-ChildItem -Path "release" -Filter "*.exe" | Select-Object -First 1
+          }
+          if ($soloExe) { Copy-Item -Path $soloExe.FullName -Destination "dist-zip-solo" }
+
           Copy-Item -Path "UserLogin.txt" -Destination "dist-zip-solo"
           Copy-Item -Path "คู่มือการติดตั้ง.txt" -Destination "dist-zip-solo"
           Compress-Archive -Path "dist-zip-solo\*" -DestinationPath "release\Make-a-Deal-POS-Solo-Windows.zip"
@@ -58,7 +66,13 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist-releases
           Copy-Item -Path "release\Make-a-Deal-POS-Solo-Windows.zip" -Destination "dist-releases"
-          Copy-Item -Path "release\*.exe" -Destination "dist-releases"
+
+          # Copy ONLY Solo .exe (named pattern) to dist-releases
+          $soloExe = Get-ChildItem -Path "release" -Filter "*Solo*Setup*.exe" | Select-Object -First 1
+          if (-not $soloExe) {
+            $soloExe = Get-ChildItem -Path "release" -Filter "*.exe" | Select-Object -First 1
+          }
+          if ($soloExe) { Copy-Item -Path $soloExe.FullName -Destination "dist-releases" }
 
       # ========================================================================
       # PHASE 2: SURGICAL CACHE CLEANUP
@@ -85,7 +99,14 @@ jobs:
       - name: Bundle LAN Setup and Guides
         run: |
           New-Item -ItemType Directory -Force -Path dist-zip-lan
-          Copy-Item -Path "release\*.exe" -Destination "dist-zip-lan"
+
+          # Copy ONLY the LAN installer .exe
+          $lanExe = Get-ChildItem -Path "release" -Filter "*LAN*Setup*.exe" | Select-Object -First 1
+          if (-not $lanExe) {
+            $lanExe = Get-ChildItem -Path "release" -Filter "*.exe" | Select-Object -First 1
+          }
+          if ($lanExe) { Copy-Item -Path $lanExe.FullName -Destination "dist-zip-lan" }
+
           Copy-Item -Path "UserLogin.txt" -Destination "dist-zip-lan"
           Copy-Item -Path "คู่มือการติดตั้ง.txt" -Destination "dist-zip-lan"
           Compress-Archive -Path "dist-zip-lan\*" -DestinationPath "release\Make-a-Deal-POS-LAN-Windows.zip"
@@ -93,7 +114,13 @@ jobs:
       - name: Store LAN Zip to Central Directory
         run: |
           Copy-Item -Path "release\Make-a-Deal-POS-LAN-Windows.zip" -Destination "dist-releases"
-          Copy-Item -Path "release\*.exe" -Destination "dist-releases"
+
+          # Copy ONLY LAN .exe to dist-releases
+          $lanExe = Get-ChildItem -Path "release" -Filter "*LAN*Setup*.exe" | Select-Object -First 1
+          if (-not $lanExe) {
+            $lanExe = Get-ChildItem -Path "release" -Filter "*.exe" | Select-Object -First 1
+          }
+          if ($lanExe) { Copy-Item -Path $lanExe.FullName -Destination "dist-releases" }
 
       # ========================================================================
       # PHASE 4: UPLOAD & RELEASE ARTIFACTS
@@ -104,7 +131,6 @@ jobs:
           name: Make-a-Deal-POS-Solo-Windows-Installer
           path: |
             dist-releases/Make-a-Deal-POS-Solo-Windows.zip
-            dist-releases/Make-a-Deal-POS-Solo-Setup-*.exe
           retention-days: 30
 
       - name: Upload LAN Installer Artifact
@@ -113,7 +139,6 @@ jobs:
           name: Make-a-Deal-POS-LAN-Windows-Installer
           path: |
             dist-releases/Make-a-Deal-POS-LAN-Windows.zip
-            dist-releases/Make-a-Deal-POS-LAN-Setup-*.exe
           retention-days: 30
 
       - name: Create GitHub Release

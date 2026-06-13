@@ -21,7 +21,7 @@ export default function App() {
   const { isAuthenticated, isLocked, user } = useAuthStore()
 
   // ── Activation Gate ────────────────────────────────────────────────────────
-  // null  = still checking (show nothing to avoid flash)
+  // null  = still checking (show spinner to avoid black screen)
   // false = not activated  (force ActivationScreen)
   // true  = activated      (proceed normally)
   const [isActivated, setIsActivated] = useState<boolean | null>(null)
@@ -33,13 +33,50 @@ export default function App() {
       setIsActivated(true)
       return
     }
-    api.system.checkActivation().then((res: any) => {
-      setIsActivated(res.success ? res.data.is_activated === 1 : true)
-    }).catch(() => setIsActivated(true))
+
+    // Timeout guard: if IPC takes > 5 seconds, proceed fail-open to avoid black screen
+    const timeout = setTimeout(() => {
+      console.warn('[Activation] Check timed out — proceeding normally')
+      setIsActivated(true)
+    }, 5000)
+
+    api.system.checkActivation()
+      .then((res: any) => {
+        clearTimeout(timeout)
+        setIsActivated(res.success ? res.data.is_activated === 1 : true)
+      })
+      .catch(() => {
+        clearTimeout(timeout)
+        setIsActivated(true)
+      })
   }, [])
 
-  // Still reading DB — render nothing to prevent layout flash
-  if (isActivated === null) return null
+  // Still reading DB — show loading spinner (NOT null) to prevent black screen
+  if (isActivated === null) return (
+    <div style={{
+      height: '100vh',
+      width: '100vw',
+      background: '#0a0a0f',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'column',
+      gap: 16,
+    }}>
+      <div style={{
+        width: 48,
+        height: 48,
+        border: '3px solid rgba(34,197,94,0.2)',
+        borderTop: '3px solid #22c55e',
+        borderRadius: '50%',
+        animation: 'spin 0.8s linear infinite',
+      }} />
+      <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+      <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 14, margin: 0, fontFamily: 'Sarabun, sans-serif' }}>
+        กำลังโหลด Make a Deal POS...
+      </p>
+    </div>
+  )
 
   // Not activated — cover 100 % of the screen, block all routing
   if (!isActivated) {

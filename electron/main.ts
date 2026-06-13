@@ -32,11 +32,7 @@ function createWindow() {
     height: 900,
     minWidth: 1280,
     minHeight: 800,
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: '#0a0a0f',
-    // vibrancy: 'dark' // macOS only,
-    visualEffectState: 'active',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -45,6 +41,8 @@ function createWindow() {
     },
     icon: path.join(__dirname, '../public/icon.png'),
     show: false,
+    frame: true,
+    autoHideMenuBar: true,
   })
 
   if (isDev) {
@@ -57,6 +55,21 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show()
     mainWindow?.focus()
+  })
+
+  // Catch renderer process crashes and failed page loads — prevents permanent black screen
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+    console.error('[Window] Page failed to load:', errorCode, errorDescription)
+    // Retry loading after short delay
+    if (!isDev) {
+      setTimeout(() => {
+        mainWindow?.loadFile(path.join(__dirname, '../dist/index.html'))
+      }, 1500)
+    }
+  })
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('[Window] Renderer process gone:', details.reason)
   })
 
   mainWindow.on('closed', () => {
