@@ -19,6 +19,7 @@ import { registerLANServerHandlers } from './ipc/lanServer'
 
 // Register local-img scheme as privileged before app is ready
 protocol.registerSchemesAsPrivileged([
+  { scheme: 'app', privileges: { bypassCSP: true, secure: true, supportFetchAPI: true, standard: true } },
   { scheme: 'local-img', privileges: { bypassCSP: true, secure: true, supportFetchAPI: true } }
 ])
 
@@ -49,7 +50,7 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:5173')
     mainWindow.webContents.openDevTools()
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+    mainWindow.loadURL('app://-/index.html')
   }
 
   mainWindow.once('ready-to-show', () => {
@@ -63,7 +64,7 @@ function createWindow() {
     // Retry loading after short delay
     if (!isDev) {
       setTimeout(() => {
-        mainWindow?.loadFile(path.join(__dirname, '../dist/index.html'))
+        mainWindow?.loadURL('app://-/index.html')
       }, 1500)
     }
   })
@@ -456,6 +457,22 @@ app.whenReady().then(() => {
       console.error('[System] Error reading package type:', err)
     }
     return { success: true, data: 'lan' } // fallback
+  })
+
+  // Register custom protocol to serve dist files (fixes CORS/file:// black screen on production)
+  protocol.handle('app', async (request) => {
+    try {
+      const url = new URL(request.url)
+      let pathname = decodeURIComponent(url.pathname)
+      if (pathname === '/' || pathname === '') {
+        pathname = '/index.html'
+      }
+      const resolvedPath = path.join(__dirname, '../dist', pathname)
+      const { pathToFileURL } = require('url')
+      return net.fetch(pathToFileURL(resolvedPath).toString())
+    } catch (error) {
+      return new Response(String(error), { status: 500 })
+    }
   })
 
   // Register custom protocol for local images from userData/images using net.fetch
