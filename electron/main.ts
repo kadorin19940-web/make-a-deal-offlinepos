@@ -58,6 +58,14 @@ function createWindow() {
     mainWindow?.focus()
   })
 
+  // Enable Ctrl+Shift+I shortcut to open DevTools in production for debugging
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.control && input.shift && input.key.toLowerCase() === 'i') {
+      mainWindow?.webContents.openDevTools()
+      event.preventDefault()
+    }
+  })
+
   // Catch renderer process crashes and failed page loads — prevents permanent black screen
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
     console.error('[Window] Page failed to load:', errorCode, errorDescription)
