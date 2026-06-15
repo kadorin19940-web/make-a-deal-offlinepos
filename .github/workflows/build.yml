@@ -74,6 +74,14 @@ jobs:
           }
           if ($soloExe) { Copy-Item -Path $soloExe.FullName -Destination "dist-releases" }
 
+      - name: Upload Solo Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Make-a-Deal-POS-Solo-Windows-Installer
+          path: |
+            dist-zip-solo/
+          retention-days: 30
+
       # ========================================================================
       # PHASE 2: SURGICAL CACHE CLEANUP
       # ========================================================================
@@ -122,25 +130,17 @@ jobs:
           }
           if ($lanExe) { Copy-Item -Path $lanExe.FullName -Destination "dist-releases" }
 
-      # ========================================================================
-      # PHASE 4: UPLOAD & RELEASE ARTIFACTS
-      # ========================================================================
-      - name: Upload Solo Installer Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Make-a-Deal-POS-Solo-Windows-Installer
-          path: |
-            dist-releases/Make-a-Deal-POS-Solo-Windows.zip
-          retention-days: 30
-
       - name: Upload LAN Installer Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Make-a-Deal-POS-LAN-Windows-Installer
           path: |
-            dist-releases/Make-a-Deal-POS-LAN-Windows.zip
+            dist-zip-lan/
           retention-days: 30
 
+      # ========================================================================
+      # PHASE 4: UPLOAD & RELEASE ARTIFACTS
+      # ========================================================================
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
