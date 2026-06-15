@@ -623,9 +623,8 @@ function formatReceiptDate(dateStr: string, settings: any): string {
 }
 
 function generateReceiptHtml(saleData: any, settings: any): string {
-  // [FIXED: Receipt Printer Layout Limits & VAT Details]
   const is80mm = settings.printer_size === '80mm'
-  const widthStyle = is80mm ? 'width: 72mm; max-width: 72mm;' : 'width: 48mm; max-width: 48mm;'
+  const widthStyle = is80mm ? 'width: 68mm; max-width: 68mm;' : 'width: 46mm; max-width: 46mm;'
   
   const itemsHtml = (saleData.items || []).map((item: any) => {
     const totalItemPrice = item.qty * item.unit_price - (item.discount_amount || 0)
