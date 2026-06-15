@@ -1,11 +1,13 @@
 // [FIXED: Translation Hook — Dynamic String Interpolation]
 // [FIXED: Dashboard Date Filtering — Thailand Timezone (UTC+7)]
 import { useEffect, useState } from 'react'
-import { TrendingUp, ShoppingCart, Package, Users, AlertTriangle, ArrowUpRight, Zap, Calendar } from 'lucide-react'
+import { TrendingUp, ShoppingCart, Users, AlertTriangle, ArrowUpRight, Zap, Calendar, Download, FileText } from 'lucide-react'
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store'
 import { useTranslation, formatAppDate, toThaiLocaleDateString } from '../../hooks/useTranslation'
+import * as XLSX from 'xlsx'
+import { useSettingsStore } from '../../store'
 
 const api = (window as any).api
 
@@ -26,6 +28,10 @@ export default function Dashboard() {
   const [topProducts, setTopProducts] = useState<any[]>([])
   const [lowStockCount, setLowStockCount] = useState<number>(0)
   const [loading, setLoading] = useState(false)
+  const [paymentFilter, setPaymentFilter] = useState<'all' | 'cash' | 'card' | 'transfer' | 'qr'>('all')
+  const [selectedSale, setSelectedSale] = useState<any | null>(null)
+  const [saleDetailLoading, setSaleDetailLoading] = useState(false)
+  const { settings } = useSettingsStore()
 
   // Calculations for dates in UTC+7 Thailand Timezone
   const getThisWeekRange = () => {
@@ -135,6 +141,121 @@ export default function Dashboard() {
 
   const formatMoney = (n: number) => `฿${(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
+  // Payment label helper
+  const paymentLabel = (method: string) => {
+    if (method === 'cash') return 'เงินสด'
+    if (method === 'card') return 'บัตรเครดิต'
+    if (method === 'transfer') return 'โอนเงิน'
+    if (method === 'qr') return 'QR/PromptPay'
+    return method || '-'
+  }
+
+  // Filtered list by payment method
+  const filteredSales = paymentFilter === 'all'
+    ? salesList
+    : salesList.filter(s => s.payment_method === paymentFilter)
+
+  // Summary totals for filtered list
+  const filteredTotal = filteredSales.filter(s => s.status === 'completed').reduce((sum, s) => sum + (Number(s.total) || 0), 0)
+  const filteredBills = filteredSales.filter(s => s.status === 'completed').length
+
+  // Export to Excel
+  const handleExportExcel = () => {
+    if (filteredSales.length === 0) return
+    const rows = filteredSales.map(s => ({
+      'เลขที่ใบเสร็จ': s.receipt_no,
+      'วันที่-เวลา': s.sale_date,
+      'ลูกค้า': s.customer_name || 'ลูกค้าทั่วไป',
+      'แคชเชียร์': s.cashier_name || 'ไม่ระบุ',
+      'ช่องทางชำระเงิน': paymentLabel(s.payment_method),
+      'ยอดรวม (บาท)': Number(s.total) || 0,
+      'สถานะ': s.status === 'completed' ? 'เสร็จสิ้น' : 'ยกเลิก',
+      'หมายเหตุ': s.note || '',
+    }))
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'ประวัติการทำรายการ')
+    const filename = `ประวัติรายการ_${startDate}_ถึง_${endDate}.xlsx`
+    if ((window as any).api) {
+      // Electron: use dialog to pick save path
+      ;(async () => {
+        const saveRes = await (window as any).api.dialog.saveFile(filename, [{ name: 'Excel Files', extensions: ['xlsx'] }])
+        if (saveRes?.filePath) {
+          const base64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' })
+          await (window as any).api.fs.writeExcel(saveRes.filePath, base64)
+        }
+      })()
+    } else {
+      XLSX.writeFile(wb, filename)
+    }
+  }
+
+  // Export to PDF via print dialog
+  const handleExportPDF = () => {
+    if (filteredSales.length === 0) return
+    const payMethodBadge = (m: string) => {
+      const colors: Record<string, string> = {
+        cash: '#22c55e', card: '#3b82f6', transfer: '#8b5cf6', qr: '#f59e0b'
+      }
+      return `<span style="background:${colors[m] || '#888'}22;color:${colors[m] || '#888'};border:1px solid ${colors[m] || '#888'}44;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700">${paymentLabel(m)}</span>`
+    }
+    const rows = filteredSales.map(s => `
+      <tr style="border-bottom:1px solid #e5e7eb">
+        <td style="padding:8px 10px;font-size:12px;color:#374151">${s.sale_date?.slice(0,16).replace('T',' ') || '-'}</td>
+        <td style="padding:8px 10px;font-size:12px;font-weight:600">${s.receipt_no}</td>
+        <td style="padding:8px 10px;font-size:12px">${s.customer_name || 'ลูกค้าทั่วไป'}</td>
+        <td style="padding:8px 10px;font-size:12px">${s.cashier_name || '-'}</td>
+        <td style="padding:8px 10px;text-align:center">${payMethodBadge(s.payment_method)}</td>
+        <td style="padding:8px 10px;font-size:13px;font-weight:700;text-align:right;color:${s.status === 'void' ? '#9ca3af' : '#059669'}">${formatMoney(Number(s.total) || 0)}</td>
+        <td style="padding:8px 10px;text-align:center">
+          <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:${s.status === 'completed' ? '#dcfce7' : '#fee2e2'};color:${s.status === 'completed' ? '#15803d' : '#b91c1c'}">${s.status === 'completed' ? 'เสร็จสิ้น' : 'ยกเลิก'}</span>
+        </td>
+        <td style="padding:8px 10px;font-size:11px;color:#6b7280">${s.note || ''}</td>
+      </tr>`).join('')
+    const html = `<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <title>ประวัติการทำรายการ</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800&display=swap');
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Sarabun',sans-serif; padding:24px; color:#111827; background:#fff; }
+    h1 { font-size:20px; font-weight:800; margin-bottom:4px; }
+    .sub { font-size:12px; color:#6b7280; margin-bottom:16px; }
+    .summary { display:flex; gap:16px; margin-bottom:20px; }
+    .sum-card { background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:10px 16px; }
+    .sum-card .label { font-size:11px; color:#6b7280; }
+    .sum-card .val { font-size:18px; font-weight:800; color:#059669; }
+    table { width:100%; border-collapse:collapse; }
+    thead th { background:#f3f4f6; padding:10px; font-size:11px; font-weight:700; text-align:left; color:#374151; border-bottom:2px solid #d1d5db; }
+    tr:hover { background:#f9fafb; }
+    @media print { body { padding:8px; } }
+  </style>
+</head>
+<body>
+  <h1>ประวัติการทำรายการ</h1>
+  <div class="sub">ช่วงเวลา: ${startDate} ถึง ${endDate} | ช่องทาง: ${paymentFilter === 'all' ? 'ทั้งหมด' : paymentLabel(paymentFilter)}</div>
+  <div class="summary">
+    <div class="sum-card"><div class="label">จำนวนบิล (เสร็จสิ้น)</div><div class="val">${filteredBills} บิล</div></div>
+    <div class="sum-card"><div class="label">ยอดรวม</div><div class="val">${formatMoney(filteredTotal)}</div></div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>วันที่-เวลา</th><th>เลขที่ใบเสร็จ</th><th>ลูกค้า</th><th>แคชเชียร์</th>
+        <th style="text-align:center">ช่องทาง</th><th style="text-align:right">ยอดรวม</th>
+        <th style="text-align:center">สถานะ</th><th>หมายเหตุ</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <script>window.onload=()=>window.print()<\/script>
+</body></html>`
+    const w = window.open('', '_blank', 'width=1100,height=800')
+    if (w) { w.document.write(html); w.document.close() }
+  }
+
   // Format the time part in UTC+7 local format
   const getSaleTimeStr = (dateStr: string) => {
     if (!dateStr) return '-'
@@ -149,6 +270,24 @@ export default function Dashboard() {
   const totalSales = summary?.total_revenue || 0
   const totalBills = summary?.bill_count || 0
   const avgBill = totalBills > 0 ? Math.round((totalSales / totalBills) * 100) / 100 : 0
+
+  const openSaleDetail = async (saleId: number) => {
+    setSaleDetailLoading(true)
+    setSelectedSale(null)
+    try {
+      const res = await api.sales.getById(saleId)
+      if (res.success) setSelectedSale(res.data)
+    } catch (e) {
+      console.error('[Dashboard] Failed to load sale detail:', e)
+    } finally {
+      setSaleDetailLoading(false)
+    }
+  }
+
+  const handleReprint = async () => {
+    if (!selectedSale) return
+    await api.print.receipt(selectedSale, settings)
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, animation: 'slideUp 0.3s ease-out' }}>
@@ -402,14 +541,96 @@ export default function Dashboard() {
             border: '1px solid rgba(255,255,255,0.08)',
             borderRadius: 20, padding: '20px 24px',
           }}>
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,0.9)' }}>{t('ประวัติการทำรายการ')}</div>
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>{t('รายละเอียดประวัติขายล่าสุด')}</div>
+            {/* Header row: title + export buttons */}
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,0.9)' }}>{t('ประวัติการทำรายการ')}</div>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>
+                  {filteredBills} {t('บิล')} · {formatMoney(filteredTotal)}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={handleExportExcel}
+                  disabled={filteredSales.length === 0}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                    background: filteredSales.length === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(34,197,94,0.12)',
+                    border: `1px solid ${filteredSales.length === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(34,197,94,0.3)'}`,
+                    color: filteredSales.length === 0 ? 'rgba(255,255,255,0.2)' : '#4ade80',
+                    cursor: filteredSales.length === 0 ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit', transition: 'all 0.2s',
+                  }}
+                >
+                  <Download size={13} /> Excel
+                </button>
+                <button
+                  onClick={handleExportPDF}
+                  disabled={filteredSales.length === 0}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                    background: filteredSales.length === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(239,68,68,0.1)',
+                    border: `1px solid ${filteredSales.length === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(239,68,68,0.3)'}`,
+                    color: filteredSales.length === 0 ? 'rgba(255,255,255,0.2)' : '#fca5a5',
+                    cursor: filteredSales.length === 0 ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit', transition: 'all 0.2s',
+                  }}
+                >
+                  <FileText size={13} /> PDF
+                </button>
+              </div>
             </div>
 
-            {salesList.length === 0 ? (
+            {/* Payment method filter — Dropdown */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', whiteSpace: 'nowrap' }}>
+                ช่องทางชำระเงิน:
+              </span>
+              <select
+                value={paymentFilter}
+                onChange={e => setPaymentFilter(e.target.value as typeof paymentFilter)}
+                className="glass-input"
+                style={{
+                  padding: '6px 32px 6px 12px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  background: 'rgba(255,255,255,0.05)',
+                  color: paymentFilter === 'all' ? '#22c55e'
+                    : paymentFilter === 'cash' ? '#22c55e'
+                    : paymentFilter === 'card' ? '#3b82f6'
+                    : paymentFilter === 'transfer' ? '#8b5cf6'
+                    : '#f59e0b',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  borderRadius: 10,
+                  cursor: 'pointer',
+                  minWidth: 190,
+                  appearance: 'auto',
+                }}
+              >
+                {([
+                  { key: 'all',      label: 'ทั้งหมด' },
+                  { key: 'cash',     label: '💵 เงินสด' },
+                  { key: 'card',     label: '💳 บัตรเครดิต' },
+                  { key: 'transfer', label: '🏦 โอนเงิน' },
+                  { key: 'qr',       label: '📱 QR/PromptPay' },
+                ] as const).map(opt => {
+                  const count = opt.key === 'all'
+                    ? salesList.length
+                    : salesList.filter(s => s.payment_method === opt.key).length
+                  return (
+                    <option key={opt.key} value={opt.key} style={{ background: '#0a0a0f', color: '#fff' }}>
+                      {opt.label} ({count} รายการ)
+                    </option>
+                  )
+                })}
+              </select>
+            </div>
+
+            {filteredSales.length === 0 ? (
               <div style={{ padding: '20px 0', color: 'rgba(255,255,255,0.2)', fontSize: 13, textAlign: 'center' }}>
-                {t('ไม่มีข้อมูลในช่วงเวลาที่เลือก')}
+                {salesList.length === 0 ? t('ไม่มีข้อมูลในช่วงเวลาที่เลือก') : 'ไม่มีรายการช่องทางนี้'}
               </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
@@ -422,46 +643,63 @@ export default function Dashboard() {
                       <th style={{ padding: '8px 12px', textAlign: 'center' }}>{t('ช่องทางรับเงิน')}</th>
                       <th style={{ padding: '8px 12px', textAlign: 'right' }}>{t('จำนวนเงิน')}</th>
                       <th style={{ padding: '8px 12px', textAlign: 'center' }}>{t('สถานะ')}</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'center' }}>{t('จัดการ')}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {salesList.map((sale) => (
-                      <tr key={sale.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', color: 'rgba(255,255,255,0.85)' }}>
-                        <td style={{ padding: '10px 12px', fontFamily: 'monospace' }}>{getSaleTimeStr(sale.sale_date)}</td>
-                        <td style={{ padding: '10px 12px', fontWeight: 600 }}>{sale.receipt_no}</td>
-                        <td style={{ padding: '10px 12px' }}>{sale.customer_name || t('ลูกค้าทั่วไป')}</td>
-                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                          <span style={{
-                            fontSize: 11,
-                            padding: '2px 8px',
-                            borderRadius: 6,
-                            background: 'rgba(255,255,255,0.06)',
-                            color: 'rgba(255,255,255,0.7)',
-                            border: '1px solid rgba(255,255,255,0.08)'
-                          }}>
-                            {sale.payment_method === 'cash' ? t('เงินสด') : 
-                              sale.payment_method === 'card' ? t('บัตร') : 
-                              sale.payment_method === 'transfer' ? t('โอน') : 'QR'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, color: sale.status === 'void' ? 'rgba(255,255,255,0.3)' : '#22c55e' }}>
-                          {formatMoney(sale.total)}
-                        </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                          <span style={{
-                            fontSize: 11,
-                            fontWeight: 700,
-                            padding: '3px 8px',
-                            borderRadius: 100,
-                            background: sale.status === 'completed' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
-                            color: sale.status === 'completed' ? '#4ade80' : '#fca5a5',
-                            border: `1px solid ${sale.status === 'completed' ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`
-                          }}>
-                            {sale.status === 'completed' ? t('เสร็จสิ้น') : t('ยกเลิก')}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                    {filteredSales.map((sale) => {
+                      const pmColor = sale.payment_method === 'cash' ? '#22c55e'
+                        : sale.payment_method === 'card' ? '#3b82f6'
+                        : sale.payment_method === 'transfer' ? '#8b5cf6'
+                        : '#f59e0b'
+                      return (
+                        <tr key={sale.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', color: 'rgba(255,255,255,0.85)' }}>
+                          <td style={{ padding: '10px 12px', fontFamily: 'monospace' }}>{getSaleTimeStr(sale.sale_date)}</td>
+                          <td style={{ padding: '10px 12px', fontWeight: 600 }}>{sale.receipt_no}</td>
+                          <td style={{ padding: '10px 12px' }}>{sale.customer_name || t('ลูกค้าทั่วไป')}</td>
+                          <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                            <span style={{
+                              fontSize: 11, padding: '2px 10px', borderRadius: 100,
+                              fontWeight: 700,
+                              background: `${pmColor}18`,
+                              color: pmColor,
+                              border: `1px solid ${pmColor}33`
+                            }}>
+                              {paymentLabel(sale.payment_method)}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, color: sale.status === 'void' ? 'rgba(255,255,255,0.3)' : '#22c55e' }}>
+                            {formatMoney(sale.total)}
+                          </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                            <span style={{
+                              fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 100,
+                              background: sale.status === 'completed' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+                              color: sale.status === 'completed' ? '#4ade80' : '#fca5a5',
+                              border: `1px solid ${sale.status === 'completed' ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`
+                            }}>
+                              {sale.status === 'completed' ? t('เสร็จสิ้น') : t('ยกเลิก')}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                            <button
+                              onClick={() => openSaleDetail(sale.id)}
+                              style={{
+                                padding: '4px 10px',
+                                fontSize: 11,
+                                borderRadius: 6,
+                                border: '1px solid rgba(255,255,255,0.15)',
+                                background: 'rgba(255,255,255,0.06)',
+                                color: 'rgba(255,255,255,0.7)',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {t('รายละเอียด')}
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -514,6 +752,123 @@ export default function Dashboard() {
         </div>
 
       </div>
+
+      {/* Sale Detail Modal */}
+      {(selectedSale || saleDetailLoading) && (
+        <div
+          onClick={() => setSelectedSale(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.65)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#1a1b23',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 12,
+              padding: 28,
+              width: '100%',
+              maxWidth: 520,
+              maxHeight: '85vh',
+              overflowY: 'auto'
+            }}
+          >
+            {saleDetailLoading ? (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: 'rgba(255,255,255,0.4)' }}>กำลังโหลด...</div>
+            ) : selectedSale ? (
+              <>
+                {/* Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,0.9)' }}>{t('รายละเอียดใบเสร็จ')}</div>
+                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2, fontFamily: 'monospace' }}>{selectedSale.receipt_no}</div>
+                  </div>
+                  <button onClick={() => setSelectedSale(null)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: 20, lineHeight: 1 }}>×</button>
+                </div>
+
+                {/* Info rows */}
+                {[
+                  { label: t('วันที่'), value: formatAppDate(selectedSale.sale_date) },
+                  { label: t('แคชเชียร์'), value: selectedSale.cashier_name || '-' },
+                  { label: t('ลูกค้า'), value: selectedSale.customer_name || t('ลูกค้าทั่วไป') },
+                  { label: t('ช่องทางรับเงิน'), value: selectedSale.payment_method === 'cash' ? t('เงินสด') : selectedSale.payment_method === 'card' ? t('บัตร') : selectedSale.payment_method === 'transfer' ? t('โอน') : 'QR' },
+                ].map(({ label, value }) => (
+                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: 13 }}>
+                    <span style={{ color: 'rgba(255,255,255,0.4)' }}>{label}</span>
+                    <span style={{ color: 'rgba(255,255,255,0.85)' }}>{value}</span>
+                  </div>
+                ))}
+
+                {/* Items */}
+                <div style={{ margin: '16px 0 8px', fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: 0.5 }}>{t('รายการสินค้า')}</div>
+                {(selectedSale.items || []).map((item: any, idx: number) => (
+                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: 13 }}>
+                    <div>
+                      <span style={{ color: 'rgba(255,255,255,0.85)' }}>{item.product_name}</span>
+                      <span style={{ color: 'rgba(255,255,255,0.35)', marginLeft: 8 }}>× {item.qty}</span>
+                    </div>
+                    <span style={{ color: 'rgba(255,255,255,0.7)' }}>{(item.unit_price * item.qty).toLocaleString('th-TH', { minimumFractionDigits: 2 })} ฿</span>
+                  </div>
+                ))}
+
+                {/* Totals */}
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', fontSize: 16, fontWeight: 700 }}>
+                  <span style={{ color: 'rgba(255,255,255,0.6)' }}>{t('รวมทั้งหมด')}</span>
+                  <span style={{ color: '#22c55e' }}>{(selectedSale.total || 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })} ฿</span>
+                </div>
+
+                {/* Void badge */}
+                {selectedSale.status === 'void' && (
+                  <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#fca5a5', fontSize: 13 }}>
+                    {t('ใบเสร็จนี้ถูกยกเลิกแล้ว')} {selectedSale.note ? `— ${selectedSale.note}` : ''}
+                  </div>
+                )}
+
+                {/* Action buttons */}
+                <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+                  {selectedSale.status === 'completed' && (
+                    <button
+                      onClick={handleReprint}
+                      style={{
+                        flex: 1,
+                        padding: '10px 0',
+                        borderRadius: 8,
+                        border: '1px solid rgba(34,197,94,0.3)',
+                        background: 'rgba(34,197,94,0.1)',
+                        color: '#4ade80',
+                        fontWeight: 600,
+                        fontSize: 13,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {t('พิมพ์ใบเสร็จอีกครั้ง')}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setSelectedSale(null)}
+                    style={{
+                      flex: 1,
+                      padding: '10px 0',
+                      borderRadius: 8,
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      background: 'rgba(255,255,255,0.05)',
+                      color: 'rgba(255,255,255,0.6)',
+                      fontWeight: 600,
+                      fontSize: 13,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {t('ปิด')}
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

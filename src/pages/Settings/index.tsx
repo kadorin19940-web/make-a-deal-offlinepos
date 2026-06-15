@@ -143,6 +143,7 @@ export default function SettingsPage() {
   const [lanServerActive, setLanServerActive] = useState(false)
   const [localIps, setLocalIps] = useState<string[]>([])
   const [packageType, setPackageType] = useState<string>('lan')
+  const [printerList, setPrinterList] = useState<{ name: string; displayName: string }[]>([])
 
   const handleSyncGoogleSheets = async () => {
     if (!api || !api.backup) {
@@ -251,6 +252,12 @@ export default function SettingsPage() {
     loadLicenseInfo() 
     loadLANServerInfo()
     loadPackageType()
+    // โหลดรายชื่อเครื่องพิมพ์ระบบ
+    if (api?.print?.getPrinters) {
+      api.print.getPrinters().then((res: { success: boolean; data?: { name: string; displayName: string }[] }) => {
+        if (res.success && res.data) setPrinterList(res.data)
+      }).catch(() => {})
+    }
   }, [])
 
   const loadLANServerInfo = async () => {
@@ -584,6 +591,50 @@ export default function SettingsPage() {
                     <option value="A5" style={{ color: '#1a1b20', background: '#ffffff' }}>A5</option>
                   </select>
                   <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>ขนาดของม้วนกระดาษของเครื่องพิมพ์ใบเสร็จความร้อน หรือแบบรายงานปกติที่ใช้งาน</p>
+                </SettingRow>
+                <SettingRow label="เครื่องพิมพ์">
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <select
+                      className="glass-input"
+                      value={local.printer_name || ''}
+                      onChange={e => setField('printer_name', e.target.value)}
+                      style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.8)', flex: 1 }}
+                    >
+                      <option value="" style={{ color: '#1a1b20', background: '#ffffff' }}>— ใช้เครื่องพิมพ์ Default —</option>
+                      {printerList.map(p => (
+                        <option key={p.name} value={p.name} style={{ color: '#1a1b20', background: '#ffffff' }}>
+                          {p.displayName || p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!local.printer_name) return
+                        if (!api?.print?.setDefaultPrinter) return
+                        const res = await api.print.setDefaultPrinter(local.printer_name)
+                        if (res.success) {
+                          // reuse toast pattern ที่มีในไฟล์นี้แล้ว
+                          setSaved(true)
+                          setTimeout(() => setSaved(false), 2500)
+                        }
+                      }}
+                      disabled={!local.printer_name}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: 12,
+                        borderRadius: 6,
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        background: 'rgba(255,255,255,0.07)',
+                        color: local.printer_name ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.25)',
+                        cursor: local.printer_name ? 'pointer' : 'not-allowed',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      ตั้งเป็น Default Windows
+                    </button>
+                  </div>
+                  <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>เลือกเครื่องพิมพ์ที่ต้องการใช้พิมพ์ใบเสร็จ หรือกดปุ่มเพื่อตั้งเป็นเครื่องพิมพ์เริ่มต้นของ Windows</p>
                 </SettingRow>
                 <SettingRow label="ข้อความส่วนหัวใบเสร็จ">
                   <input className="glass-input" value={local.receipt_header || ''} onChange={e => setField('receipt_header', e.target.value)} placeholder="ขอบคุณที่ใช้บริการ" />

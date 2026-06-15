@@ -458,7 +458,8 @@ export function registerReportHandlers(db: Database.Database) {
         "ID",
         "เลขที่ใบเสร็จ",
         "วันที่-เวลา",
-        "รหัสสินค้า (Barcode/SKU)",
+        "SKU",
+        "บาร์โค้ด",
         "ชื่อสินค้า",
         "จำนวน",
         "หน่วย",
@@ -503,13 +504,15 @@ export function registerReportHandlers(db: Database.Database) {
         const mapped = rows.map(r => {
           // If products.name IS NULL -> display "(สินค้าถูกลบออกจากระบบ)"
           const pName = r.product_name || '(สินค้าถูกลบออกจากระบบ)'
-          // If products.barcode IS NULL -> display "-"
-          const pBarcode = r.product_barcode || r.product_sku || '-'
+          // Barcode and SKU are now separate columns
+          const pBarcode = r.product_barcode || '-'
+          const pSku = r.product_sku || '-'
 
           return [
             r.id,
             r.receipt_no,
             r.sale_date,
+            pSku,
             pBarcode,
             pName,
             Number(r.qty) || 0,
@@ -966,7 +969,7 @@ export function registerSupplierHandlers(db: Database.Database) {
   })
 }
 
-export function registerBackupHandlers(db: Database.Database) {
+export function registerBackupHandlers(db: Database.Database, scheduleBackup: () => void) {
   const path = require('path')
   const fs = require('fs')
   const { app } = require('electron')
@@ -1007,8 +1010,23 @@ export function registerBackupHandlers(db: Database.Database) {
     } catch (error) { return { success: false, error: String(error) } }
   })
 
-  ipcMain.handle('backup:setAutoBackup', () => {
-    return { success: true }
+  ipcMain.handle('backup:setAutoBackup', (_: Electron.IpcMainInvokeEvent, settings: { backup_enabled?: boolean; backup_interval_hours?: number }) => {
+    try {
+      const upsert = db.prepare(`
+        INSERT INTO shop_settings (key, value) VALUES (@key, @value)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `)
+      if (settings.backup_enabled !== undefined) {
+        upsert.run({ key: 'backup_enabled', value: String(settings.backup_enabled) })
+      }
+      if (settings.backup_interval_hours !== undefined) {
+        upsert.run({ key: 'backup_interval_hours', value: String(settings.backup_interval_hours) })
+      }
+      scheduleBackup()
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
   })
 
   ipcMain.handle('backup:export-custom', async (_, targetDir: string) => {

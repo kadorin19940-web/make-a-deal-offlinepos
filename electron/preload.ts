@@ -180,6 +180,10 @@ const api = {
   print: {
     receipt: (saleData: Record<string, unknown>, settings: Record<string, unknown>) =>
       ipcRenderer.invoke('print:receipt', { saleData, settings }),
+    getPrinters: () =>
+      ipcRenderer.invoke('print:getPrinters'),
+    setDefaultPrinter: (printerName: string) =>
+      ipcRenderer.invoke('print:setDefaultPrinter', printerName),
   },
 
   // License Activation System

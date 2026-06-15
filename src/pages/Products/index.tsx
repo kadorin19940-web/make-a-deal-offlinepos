@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Search, Edit2, Trash2, Package, Grid, List, Download, Upload, X, AlertTriangle } from 'lucide-react'
+import { Plus, Search, Edit2, Trash2, Package, Grid, List, Download, Upload, X, AlertTriangle, Settings2, Tag } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { Product, Category } from '../../types'
 import { useAuthStore } from '../../store'
@@ -33,6 +33,11 @@ export default function ProductsPage() {
   const { user: currentUser } = useAuthStore()
   const isAdmin = currentUser?.role?.toLowerCase() === 'admin'
 
+  // Category manager state
+  const [showCatManager, setShowCatManager] = useState(false)
+  const [addCatForm, setAddCatForm] = useState({ name: '', icon: '📦', color: '#22c55e' })
+  const [catSaving, setCatSaving] = useState(false)
+
   useEffect(() => { loadData() }, [])
 
   const loadData = async () => {
@@ -53,6 +58,42 @@ export default function ProductsPage() {
     if (api) { await api.products.delete(id, currentUser?.id) }
     setProducts(p => p.filter(x => x.id !== id))
     toast.success('ลบสินค้าแล้ว')
+  }
+
+  const handleAddCategory = async () => {
+    if (!addCatForm.name.trim()) { toast.error('กรุณาใส่ชื่อหมวดหมู่'); return }
+    setCatSaving(true)
+    try {
+      if (api) {
+        const res = await api.categories.create(addCatForm)
+        if (res.success) {
+          toast.success('เพิ่มหมวดหมู่แล้ว')
+          setAddCatForm({ name: '', icon: '📦', color: '#22c55e' })
+          const cRes = await api.categories.getAll()
+          if (cRes.success) setCategories(cRes.data)
+        } else { toast.error(res.error || 'ไม่สามารถเพิ่มได้') }
+      } else {
+        const newCat = { id: Date.now(), ...addCatForm, sort_order: categories.length, is_active: 1, created_at: '' }
+        setCategories(prev => [...prev, newCat as any])
+        setAddCatForm({ name: '', icon: '📦', color: '#22c55e' })
+        toast.success('เพิ่มหมวดหมู่แล้ว')
+      }
+    } finally { setCatSaving(false) }
+  }
+
+  const handleDeleteCategory = async (id: number, name: string) => {
+    const usedCount = products.filter(p => p.category_id === id).length
+    const msg = usedCount > 0
+      ? `หมวดหมู่ "${name}" มีสินค้าใช้งานอยู่ ${usedCount} รายการ ยืนยันลบหมวดหมู่นี้หรือไม่?`
+      : `ต้องการลบหมวดหมู่ "${name}" หรือไม่?`
+    if (!confirm(msg)) return
+    if (api) {
+      const res = await api.categories.delete(id)
+      if (!res.success) { toast.error(res.error || 'ไม่สามารถลบได้'); return }
+    }
+    setCategories(prev => prev.filter(c => c.id !== id))
+    if (categoryFilter === id) setCategoryFilter(null)
+    toast.success(`ลบหมวดหมู่ "${name}" แล้ว`)
   }
 
   const fmt = (n: number) => `฿${n.toLocaleString()}`
@@ -81,8 +122,8 @@ export default function ProductsPage() {
         )}
       </div>
 
-      {/* Category filter pills */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      {/* Category filter pills + manage button */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <button onClick={() => setCategoryFilter(null)} className={`category-pill ${!categoryFilter ? 'active' : ''}`} style={!categoryFilter ? { background: 'rgba(34,197,94,0.15)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' } : {}}>ทั้งหมด ({products.length})</button>
         {categories.map(c => (
           <button key={c.id} onClick={() => setCategoryFilter(categoryFilter === c.id ? null : c.id)}
@@ -91,6 +132,25 @@ export default function ProductsPage() {
             {c.icon} {c.name}
           </button>
         ))}
+        {isAdmin && (
+          <button
+            onClick={() => setShowCatManager(true)}
+            title="จัดการหมวดหมู่"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              padding: '5px 12px', borderRadius: 100, fontSize: 12,
+              fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              color: 'rgba(255,255,255,0.5)',
+              transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#fff'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.25)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.5)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.12)' }}
+          >
+            <Settings2 size={13} /> จัดการหมวดหมู่
+          </button>
+        )}
       </div>
 
       {/* Stats row */}
@@ -252,6 +312,139 @@ export default function ProductsPage() {
             loadData()
           }}
         />
+      )}
+      {/* Category Manager Modal */}
+      {showCatManager && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowCatManager(false)}>
+          <div className="modal-content" style={{ width: 460, padding: 0, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+            {/* Header */}
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Tag size={16} color="#22c55e" />
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,0.9)' }}>จัดการหมวดหมู่</span>
+                <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>({categories.length} หมวด)</span>
+              </div>
+              <button onClick={() => setShowCatManager(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.4)' }}><X size={18} /></button>
+            </div>
+
+            {/* Category list */}
+            <div style={{ overflowY: 'auto', flex: 1, padding: '12px 20px' }}>
+              {categories.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '30px 0', color: 'rgba(255,255,255,0.2)', fontSize: 13 }}>ยังไม่มีหมวดหมู่</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {categories.map(c => {
+                    const usedCount = products.filter(p => p.category_id === c.id).length
+                    return (
+                      <div key={c.id} style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '10px 14px', borderRadius: 10,
+                        background: 'rgba(255,255,255,0.04)',
+                        border: '1px solid rgba(255,255,255,0.07)',
+                      }}>
+                        {/* Color swatch */}
+                        <div style={{ width: 10, height: 10, borderRadius: '50%', background: c.color, flexShrink: 0 }} />
+                        {/* Icon + name */}
+                        <span style={{ fontSize: 18, lineHeight: 1 }}>{c.icon}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.9)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
+                          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>{usedCount} สินค้า</div>
+                        </div>
+                        {/* Delete button */}
+                        <button
+                          onClick={() => handleDeleteCategory(c.id, c.name)}
+                          title={`ลบ ${c.name}`}
+                          style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+                            background: 'rgba(239,68,68,0.08)',
+                            border: '1px solid rgba(239,68,68,0.2)',
+                            color: '#fca5a5', cursor: 'pointer',
+                            transition: 'all 0.15s',
+                          }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.2)' }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.08)' }}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Add new category form */}
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', padding: '16px 20px', flexShrink: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.45)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>เพิ่มหมวดหมู่ใหม่</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {/* Name */}
+                <input
+                  className="glass-input"
+                  placeholder="ชื่อหมวดหมู่..."
+                  value={addCatForm.name}
+                  onChange={e => setAddCatForm(f => ({ ...f, name: e.target.value }))}
+                  onKeyDown={e => { if (e.key === 'Enter') handleAddCategory() }}
+                />
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  {/* Icon presets */}
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flex: 1 }}>
+                    {['📦','🍔','📱','👕','💄','⚡','🏠','🚗','📚','🎮'].map(icon => (
+                      <button
+                        key={icon}
+                        onClick={() => setAddCatForm(f => ({ ...f, icon }))}
+                        style={{
+                          width: 32, height: 32, borderRadius: 8, fontSize: 16,
+                          border: addCatForm.icon === icon ? '2px solid #22c55e' : '1px solid rgba(255,255,255,0.1)',
+                          background: addCatForm.icon === icon ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.04)',
+                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          transition: 'all 0.1s',
+                        }}
+                      >{icon}</button>
+                    ))}
+                    {/* Free text icon */}
+                    <input
+                      className="glass-input"
+                      value={addCatForm.icon}
+                      onChange={e => setAddCatForm(f => ({ ...f, icon: e.target.value }))}
+                      style={{ width: 40, textAlign: 'center', fontSize: 16, padding: '4px' }}
+                      maxLength={2}
+                    />
+                  </div>
+                  {/* Color */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>สี:</span>
+                    <input
+                      type="color"
+                      value={addCatForm.color}
+                      onChange={e => setAddCatForm(f => ({ ...f, color: e.target.value }))}
+                      style={{ width: 36, height: 32, border: 'none', borderRadius: 8, cursor: 'pointer', background: 'transparent', padding: 2 }}
+                    />
+                  </div>
+                </div>
+                {/* Preview + Save */}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <div style={{
+                    flex: 1, padding: '8px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                    background: `${addCatForm.color}15`,
+                    border: `1px solid ${addCatForm.color}40`,
+                    color: addCatForm.color,
+                  }}>
+                    {addCatForm.icon} {addCatForm.name || 'ตัวอย่างหมวดหมู่'}
+                  </div>
+                  <button
+                    onClick={handleAddCategory}
+                    disabled={catSaving || !addCatForm.name.trim()}
+                    className="glass-btn btn-primary"
+                    style={{ padding: '8px 18px', fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', opacity: (!addCatForm.name.trim() || catSaving) ? 0.4 : 1 }}
+                  >
+                    <Plus size={14} /> เพิ่ม
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

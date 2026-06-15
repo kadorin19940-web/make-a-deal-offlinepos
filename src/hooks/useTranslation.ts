@@ -167,25 +167,35 @@ export function formatAppDate(
   const template = customFormat || settingsStore?.settings?.date_format || 'dd/MM/yyyy'
 
   const locale = lang === 'en' ? enUS : th
-  let year = date.getFullYear()
-  if (lang === 'th') {
-    year += 543
+  const ceYear = date.getFullYear()
+  const beYear = ceYear + 543
+  const targetYear = lang === 'th' ? beYear : ceYear
+
+  // Determine year token length from template (yyyy = 4 digits, yy = 2 digits)
+  const yearMatch = template.match(/y+/i)
+  const yearTokenLen = yearMatch ? yearMatch[0].length : 4
+  const yearStr = yearTokenLen <= 2 ? String(targetYear).slice(-2) : String(targetYear)
+
+  // Use a sentinel with NO latin letters so date-fns won't touch it
+  // We use the unicode snowman ☃ as a safe separator marker
+  const SENTINEL = '☃'
+
+  // Replace year tokens with escaped sentinel, format the rest normally
+  const safeTemplate = template
+    .replace(/y{1,4}/gi, `'${SENTINEL}'`)
+
+  let formatted: string
+  try {
+    formatted = format(date, safeTemplate, { locale })
+  } catch {
+    // Fallback: just return ISO-like string
+    const mm = String(date.getMonth() + 1).padStart(2, '0')
+    const dd = String(date.getDate()).padStart(2, '0')
+    return `${dd}/${mm}/${targetYear}`
   }
 
-  // Format date using placeholders for year
-  let formatted = format(date, template.replace(/y+/g, 'YEAR_PLACEHOLDER').replace(/Y+/g, 'YEAR_PLACEHOLDER'), { locale })
-
-  // Replace YEAR_PLACEHOLDER with local era year
-  const yearStr = String(year)
-  const shortYearStr = yearStr.slice(-2)
-
-  if (template.toLowerCase().includes('yyyy')) {
-    formatted = formatted.replace('YEAR_PLACEHOLDER', yearStr)
-  } else if (template.toLowerCase().includes('yy')) {
-    formatted = formatted.replace('YEAR_PLACEHOLDER', shortYearStr)
-  } else {
-    formatted = formatted.replace('YEAR_PLACEHOLDER', yearStr)
-  }
+  // Replace sentinel with B.E./C.E. year
+  formatted = formatted.replace(SENTINEL, yearStr)
 
   return formatted
 }

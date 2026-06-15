@@ -324,7 +324,7 @@ export default function POSPage() {
     }}>
 
       {/* [FIXED: POS Layout Swap — Minimum Width Guard] */}
-      {isSwapAllowed && (
+      {isSwapAllowed && !showPayment && (
         <div style={{
           position: 'absolute',
           left: activeCartOnRight ? '45%' : '55%',

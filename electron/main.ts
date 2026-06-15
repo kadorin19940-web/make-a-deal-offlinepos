@@ -89,10 +89,24 @@ function createWindow() {
 app.whenReady().then(() => {
   // Initialize database
   const db = initDatabase()
+  let backupIntervalId: ReturnType<typeof setInterval> | null = null
+  let backupIsRunning = false
 
   // Permanent Silent Backup implementation
   const runSilentBackup = () => {
     try {
+      // Guard: ตรวจ backup_enabled ก่อนรัน
+      const enabledRow = db.prepare("SELECT value FROM shop_settings WHERE key = 'backup_enabled'").get() as { value: string } | undefined
+      if (enabledRow && enabledRow.value === 'false') {
+        console.log('[Silent Backup] Skipped — backup_enabled is false')
+        return
+      }
+      if (backupIsRunning) {
+        console.log('[Silent Backup] Skipped — backup already in progress')
+        return
+      }
+      backupIsRunning = true
+
       const homedir = os.homedir()
       const backupDir = path.join(homedir, 'Documents', 'MakeADeal_Backups')
       
@@ -114,20 +128,46 @@ app.whenReady().then(() => {
       db.backup(backupPath)
         .then(() => {
           console.log('[Silent Backup] Success:', backupPath)
+          backupIsRunning = false
         })
         .catch((err) => {
           console.error('[Silent Backup] Backup failed:', err)
+          backupIsRunning = false
         })
     } catch (error) {
       console.error('[Silent Backup] Directory creation or backup error:', error)
+      backupIsRunning = false
     }
   }
 
   // Trigger 1: Silent Backup on App Startup (with small delay to prevent DB boot locks)
   setTimeout(runSilentBackup, 2000)
 
-  // Trigger 3: Silent Backup Background Interval (every 1 hour)
-  setInterval(runSilentBackup, 60 * 60 * 1000)
+  // Trigger 3: Silent Backup Background Interval (dynamic — reads backup_interval_hours from DB)
+  const scheduleBackup = () => {
+    if (backupIntervalId !== null) {
+      clearInterval(backupIntervalId)
+      backupIntervalId = null
+    }
+    try {
+      const enabledRow = db.prepare("SELECT value FROM shop_settings WHERE key = 'backup_enabled'").get() as { value: string } | undefined
+      const intervalRow = db.prepare("SELECT value FROM shop_settings WHERE key = 'backup_interval_hours'").get() as { value: string } | undefined
+      const enabled = enabledRow ? enabledRow.value !== 'false' : true
+      const hours = intervalRow ? parseFloat(intervalRow.value) : 24
+      const ms = (isNaN(hours) || hours <= 0 ? 24 : hours) * 60 * 60 * 1000
+      if (!enabled) {
+        console.log('[Silent Backup] Scheduler disabled — backup_enabled is false')
+        return
+      }
+      console.log(`[Silent Backup] Scheduler set — every ${hours}h (${ms}ms)`)
+      backupIntervalId = setInterval(runSilentBackup, ms)
+    } catch (err) {
+      console.error('[Silent Backup] Failed to read schedule settings, falling back to 24h:', err)
+      backupIntervalId = setInterval(runSilentBackup, 24 * 60 * 60 * 1000)
+    }
+  }
+
+  scheduleBackup()
 
   // Register silent backup IPC trigger (used for Trigger 2: Shift Close)
   ipcMain.handle('backup:silent-trigger', async () => {
@@ -150,7 +190,7 @@ app.whenReady().then(() => {
   registerSessionHandlers(db)
   registerPromotionHandlers(db)
   registerSupplierHandlers(db)
-  registerBackupHandlers(db)
+  registerBackupHandlers(db, scheduleBackup)
   registerLANServerHandlers(db)
 
   // Generic dialog handlers
@@ -230,10 +270,12 @@ app.whenReady().then(() => {
         printWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(htmlContent))
         
         printWin.webContents.once('did-finish-load', () => {
+          const printerName = (settings as Record<string, unknown>)?.printer_name as string | undefined
           printWin.webContents.print({
             silent: true,
             printBackground: true,
-            margins: { marginType: 'none' }
+            margins: { marginType: 'none' },
+            ...(printerName ? { deviceName: printerName } : {})
           }, (success, failureReason) => {
             printWin.destroy() // Always clean up to prevent resource/memory leaks
             if (success) {
@@ -247,6 +289,36 @@ app.whenReady().then(() => {
         resolve({ success: false, error: String(err) })
       }
     })
+  })
+
+  // Get list of system printers
+  ipcMain.handle('print:getPrinters', async (event) => {
+    try {
+      const printers = await event.sender.getPrintersAsync()
+      return { success: true, data: printers }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // Set Windows default printer via shell command
+  ipcMain.handle('print:setDefaultPrinter', async (_, printerName: string) => {
+    try {
+      if (!printerName) return { success: false, error: 'ไม่ได้ระบุชื่อเครื่องพิมพ์' }
+      const { exec } = require('child_process')
+      await new Promise<void>((resolve, reject) => {
+        exec(
+          `rundll32.exe printui.dll,PrintUIEntry /y /n "${printerName}"`,
+          (error: Error | null) => {
+            if (error) reject(error)
+            else resolve()
+          }
+        )
+      })
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
   })
 
   // [FIXED: Cash Drawer IPC — Fire-and-Forget with Timeout Guard]
