@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } from 'elect
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { machineIdSync } from 'node-machine-id'
+import { machineId } from 'node-machine-id'
 import { initDatabase } from './database'
 import { registerProductHandlers } from './ipc/products'
 import { registerSalesHandlers } from './ipc/sales'
@@ -386,10 +386,11 @@ app.whenReady().then(() => {
   // =============================================================================
 
   // 1. Return the immutable hardware fingerprint (UUID) for this machine
-  ipcMain.handle('system:get-hardware-id', () => {
+  ipcMain.handle('system:get-hardware-id', async () => {
     try {
       // Pass `true` to get the original machine UUID (not hashed)
-      return { success: true, data: machineIdSync(true) }
+      const id = await machineId(true)
+      return { success: true, data: id }
     } catch (error) {
       return { success: false, error: String(error) }
     }
