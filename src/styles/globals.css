@@ -414,14 +414,15 @@ body {
     background: var(--glass);
     border: 1px solid var(--glass-border);
     border-radius: var(--radius-lg);
-    padding: 14px;
+    padding: 10px 10px 12px;
     cursor: pointer;
     transition: all var(--transition-fast);
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     overflow: hidden;
     position: relative;
+    min-width: 0;
   }
 
   .product-card-pos:hover {
