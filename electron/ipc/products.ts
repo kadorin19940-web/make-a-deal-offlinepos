@@ -122,7 +122,12 @@ export function registerProductHandlers(db: Database.Database) {
         is_service: 0,
         is_active: 1,
         has_variants: 0,
-        tax_rate: 7
+        tax_rate: 7,
+        special_price: null,
+        discount_percent: null,
+        special_price_enabled: 0,
+        discount_enabled: 0,
+        price_schedules: null
       }
 
       const mergedData = { ...defaultProduct, ...data }
@@ -130,10 +135,12 @@ export function registerProductHandlers(db: Database.Database) {
       const stmt = db.prepare(`
         INSERT INTO products (barcode, sku, name, name_en, description, category_id, unit,
           cost_price, sell_price, sell_price2, sell_price3, stock_qty, min_stock, max_stock,
-          image_path, is_service, is_active, has_variants, tax_rate)
+          image_path, is_service, is_active, has_variants, tax_rate,
+          special_price, discount_percent, special_price_enabled, discount_enabled, price_schedules)
         VALUES (@barcode, @sku, @name, @name_en, @description, @category_id, @unit,
           @cost_price, @sell_price, @sell_price2, @sell_price3, @stock_qty, @min_stock, @max_stock,
-          @image_path, @is_service, @is_active, @has_variants, @tax_rate)
+          @image_path, @is_service, @is_active, @has_variants, @tax_rate,
+          @special_price, @discount_percent, @special_price_enabled, @discount_enabled, @price_schedules)
       `)
       const result = stmt.run(mergedData)
       return { success: true, data: { id: result.lastInsertRowid } }

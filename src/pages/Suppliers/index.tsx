@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Plus, Search, Edit2, Trash2, Truck, Phone, Mail, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { Supplier } from '../../types'
@@ -10,7 +10,7 @@ const MOCK_SUPPLIERS: Supplier[] = [
 ]
 
 export default function SuppliersPage() {
-  const [suppliers, setSuppliers] = useState<Supplier[]>(MOCK_SUPPLIERS)
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Supplier | null>(null)
@@ -20,6 +20,19 @@ export default function SuppliersPage() {
     !search || s.name.toLowerCase().includes(search.toLowerCase()) || s.phone?.includes(search) || s.code.includes(search)
   )
 
+  useEffect(() => {
+    loadData()
+  }, [])
+
+  const loadData = async () => {
+    const api = (window as any).api
+    if (!api?.suppliers) return
+    const res = await api.suppliers.getAll()
+    if (res.success && res.data) {
+      setSuppliers(res.data)
+    }
+  }
+
   const openModal = (s?: Supplier) => {
     setEditing(s || null)
     setForm(s ? { name: s.name, contact_name: s.contact_name || '', phone: s.phone || '', email: s.email || '', address: s.address || '', tax_id: s.tax_id || '', payment_terms: s.payment_terms, note: s.note || '' } : { name: '', contact_name: '', phone: '', email: '', address: '', tax_id: '', payment_terms: 30, note: '' })
@@ -28,21 +41,54 @@ export default function SuppliersPage() {
 
   const handleSave = async () => {
     if (!form.name.trim()) { toast.error('กรุณากรอกชื่อซัพพลายเออร์'); return }
-    if (editing) {
-      setSuppliers(s => s.map(x => x.id === editing.id ? { ...x, ...form } : x))
-      toast.success('แก้ไขซัพพลายเออร์แล้ว')
+    const api = (window as any).api
+    if (api?.suppliers) {
+      if (editing) {
+        const res = await api.suppliers.update(editing.id, form)
+        if (res.success) {
+          toast.success('แก้ไขซัพพลายเออร์แล้ว')
+        } else {
+          toast.error(res.error || 'เกิดข้อผิดพลาดในการแก้ไข')
+          return
+        }
+      } else {
+        const res = await api.suppliers.create(form)
+        if (res.success) {
+          toast.success('เพิ่มซัพพลายเออร์แล้ว')
+        } else {
+          toast.error(res.error || 'เกิดข้อผิดพลาดในการเพิ่ม')
+          return
+        }
+      }
+      loadData()
     } else {
-      const newS: Supplier = { id: Date.now(), code: `SUP${String(suppliers.length + 1).padStart(3, '0')}`, ...form, is_active: 1, created_at: new Date().toISOString() }
-      setSuppliers(s => [...s, newS])
-      toast.success('เพิ่มซัพพลายเออร์แล้ว')
+      if (editing) {
+        setSuppliers(s => s.map(x => x.id === editing.id ? { ...x, ...form } : x))
+        toast.success('แก้ไขซัพพลายเออร์แล้ว')
+      } else {
+        const newS: Supplier = { id: Date.now(), code: `SUP${String(suppliers.length + 1).padStart(3, '0')}`, ...form, is_active: 1, created_at: new Date().toISOString() }
+        setSuppliers(s => [...s, newS])
+        toast.success('เพิ่มซัพพลายเออร์แล้ว')
+      }
     }
     setShowModal(false)
   }
 
-  const handleDelete = (id: number) => {
+  const handleDelete = async (id: number) => {
     if (!confirm('ต้องการลบซัพพลายเออร์นี้?')) return
-    setSuppliers(s => s.filter(x => x.id !== id))
-    toast.success('ลบซัพพลายเออร์แล้ว')
+    const api = (window as any).api
+    if (api?.suppliers) {
+      const res = await api.suppliers.delete(id)
+      if (res.success) {
+        toast.success('ลบซัพพลายเออร์แล้ว')
+        loadData()
+      } else {
+        toast.error(res.error || 'ไม่สามารถลบได้')
+      }
+    } else {
+      setSuppliers(s => s.filter(x => x.id !== id))
+      toast.success('ลบซัพพลายเออร์แล้ว')
+    }
   }
 
   return (
@@ -61,7 +107,7 @@ export default function SuppliersPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
         {[
           { label: 'ซัพพลายเออร์ทั้งหมด', value: suppliers.length, color: '#3b82f6' },
-          { label: 'เฉลี่ยเครดิต', value: `${Math.round(suppliers.reduce((s, x) => s + x.payment_terms, 0) / suppliers.length)} วัน`, color: '#f59e0b' },
+          { label: 'เฉลี่ยเครดิต', value: `${suppliers.length > 0 ? Math.round(suppliers.reduce((s, x) => s + x.payment_terms, 0) / suppliers.length) : 0} วัน`, color: '#f59e0b' },
           { label: 'ใช้งานอยู่', value: suppliers.filter(s => s.is_active).length, color: '#22c55e' },
         ].map((s, i) => (
           <div key={i} style={{ padding: '14px 18px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14 }}>
@@ -132,12 +178,28 @@ export default function SuppliersPage() {
               {[['name','ชื่อบริษัท/ร้าน *'], ['contact_name','ชื่อผู้ติดต่อ'], ['phone','เบอร์โทรศัพท์'], ['email','อีเมล'], ['address','ที่อยู่'], ['tax_id','เลขผู้เสียภาษี']].map(([k, l]) => (
                 <div key={k}>
                   <label style={{ display: 'block', fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 5 }}>{l}</label>
-                  <input className="glass-input" value={(form as any)[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} placeholder={l} />
+                  <input
+                    className="glass-input"
+                    value={(form as any)[k]}
+                    onChange={e => {
+                      const val = e.target.value
+                      setForm(f => ({ ...f, [k]: val }))
+                    }}
+                    placeholder={l}
+                  />
                 </div>
               ))}
               <div>
                 <label style={{ display: 'block', fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 5 }}>เครดิต (วัน)</label>
-                <input className="glass-input" type="number" value={form.payment_terms} onChange={e => setForm(f => ({ ...f, payment_terms: parseInt(e.target.value) || 0 }))} />
+                <input
+                  className="glass-input"
+                  type="number"
+                  value={form.payment_terms}
+                  onChange={e => {
+                    const val = parseInt(e.target.value) || 0
+                    setForm(f => ({ ...f, payment_terms: val }))
+                  }}
+                />
               </div>
             </div>
             <div style={{ padding: '0 20px 20px', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>

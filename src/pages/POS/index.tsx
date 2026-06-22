@@ -18,15 +18,15 @@ import CustomerSearchModal from './CustomerSearchModal'
 import { useTranslation } from '../../hooks/useTranslation'
 
 // Helper: compute effective price for a product based on special_price/discount + time schedule
-function getEffectivePrice(product: Product): number {
+function getEffectivePrice(product: Product, manualSpecialPriceEnabled: boolean = false): number {
   const now = new Date()
   const nowMins = now.getHours() * 60 + now.getMinutes()
 
   const isInSchedule = (): boolean => {
-    if (!product.price_schedules) return true
+    if (!product.price_schedules) return false
     try {
       const schedules: { start: string; end: string }[] = JSON.parse(product.price_schedules)
-      if (schedules.length === 0) return true
+      if (schedules.length === 0) return false
       return schedules.some(s => {
         const [sh, sm] = s.start.split(':').map(Number)
         const [eh, em] = s.end.split(':').map(Number)
@@ -34,14 +34,18 @@ function getEffectivePrice(product: Product): number {
         const endMins = eh * 60 + em
         return nowMins >= startMins && nowMins <= endMins
       })
-    } catch { return true }
+    } catch { return false }
   }
 
-  if (product.special_price_enabled && product.special_price != null && isInSchedule()) {
-    return product.special_price
-  }
-  if (product.discount_enabled && product.discount_percent != null && isInSchedule()) {
-    return Math.round(product.sell_price * (1 - product.discount_percent / 100) * 100) / 100
+  const isSpecialActive = manualSpecialPriceEnabled || isInSchedule()
+
+  if (isSpecialActive) {
+    if (product.special_price_enabled && product.special_price != null) {
+      return product.special_price
+    }
+    if (product.discount_enabled && product.discount_percent != null) {
+      return Math.round(product.sell_price * (1 - product.discount_percent / 100) * 100) / 100
+    }
   }
   return product.sell_price
 }
@@ -65,6 +69,7 @@ export default function POSPage() {
   const navigate = useNavigate()
   const { t } = useTranslation()
   const [products, setProducts] = useState<Product[]>([])
+  const [manualSpecialPriceEnabled, setManualSpecialPriceEnabled] = useState(false)
   const [categories, setCategories] = useState<Category[]>([])
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -141,6 +146,20 @@ export default function POSPage() {
     loadProducts()
     loadPromotions()
   }, [])
+
+  // Dynamic Cart Item Price Updater when Price Level or Special Price mode toggles
+  useEffect(() => {
+    items.forEach((item, index) => {
+      if (item.product) {
+        const basePrice = customer?.price_level === 2 ? (item.product.sell_price2 ?? item.product.sell_price)
+          : customer?.price_level === 3 ? (item.product.sell_price3 ?? item.product.sell_price)
+          : getEffectivePrice(item.product, manualSpecialPriceEnabled)
+        if (item.unit_price !== basePrice) {
+          updateItem(index, { unit_price: basePrice })
+        }
+      }
+    })
+  }, [manualSpecialPriceEnabled, customer, items, updateItem])
 
   const loadPromotions = async () => {
     if (api && api.promotions && api.promotions.getAll) {
@@ -274,7 +293,7 @@ export default function POSPage() {
     // [Req 6] Use effective price (special/discount/schedule) or price level
     const basePrice = customer?.price_level === 2 ? (product.sell_price2 ?? product.sell_price)
       : customer?.price_level === 3 ? (product.sell_price3 ?? product.sell_price)
-      : getEffectivePrice(product)
+      : getEffectivePrice(product, manualSpecialPriceEnabled)
 
     const item: CartItem = {
       product_id: product.id,
@@ -484,6 +503,34 @@ export default function POSPage() {
               {t('เปิดลิ้นชัก')}
             </button>
           )}
+
+          {/* Special Price Toggle Button */}
+          <button
+            onClick={() => {
+              const newVal = !manualSpecialPriceEnabled
+              setManualSpecialPriceEnabled(newVal)
+              if (newVal) {
+                toast.success(t('เปิดใช้งานระบบราคาพิเศษ/ส่วนลดแล้ว'))
+              } else {
+                toast(t('ปิดการใช้งานระบบราคาพิเศษ (ใช้ราคาปกติ)'))
+              }
+            }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 12px',
+              background: manualSpecialPriceEnabled ? 'rgba(236,72,153,0.15)' : 'rgba(255,255,255,0.05)',
+              border: `1px solid ${manualSpecialPriceEnabled ? 'rgba(236,72,153,0.4)' : 'rgba(255,255,255,0.08)'}`,
+              borderRadius: 8, cursor: 'pointer',
+              color: manualSpecialPriceEnabled ? '#f472b6' : 'rgba(255,255,255,0.5)',
+              fontSize: 12, fontFamily: 'inherit',
+              fontWeight: 600,
+              transition: 'all 0.2s',
+              boxShadow: manualSpecialPriceEnabled ? '0 0 12px rgba(236,72,153,0.15)' : 'none',
+            }}
+          >
+            <Tag size={13} style={{ transform: manualSpecialPriceEnabled ? 'scale(1.1)' : 'none' }} />
+            {manualSpecialPriceEnabled ? t('ราคาพิเศษ: เปิด') : t('ราคาพิเศษ: ปิด')}
+          </button>
 
           {/* Customer */}
           <button
@@ -814,6 +861,7 @@ export default function POSPage() {
               product={product}
               onAdd={() => addToCart(product)}
               formatMoney={formatMoney}
+              manualSpecialPriceEnabled={manualSpecialPriceEnabled}
             />
           ))}
           {filteredProducts.length === 0 && (
@@ -981,13 +1029,16 @@ function CartItemRow({ item, index, onUpdate, onRemove, formatMoney }: {
   )
 }
 
-function ProductCard({ product, onAdd, formatMoney }: {
+function ProductCard({ product, onAdd, formatMoney, manualSpecialPriceEnabled }: {
   product: Product
   onAdd: () => void
   formatMoney: (n: number) => string
+  manualSpecialPriceEnabled: boolean
 }) {
   const { t } = useTranslation()
   const outOfStock = !product.is_service && product.stock_qty <= 0
+  const displayPrice = getEffectivePrice(product, manualSpecialPriceEnabled)
+  const isDiscounted = displayPrice !== product.sell_price
 
   return (
     <div
@@ -1034,9 +1085,15 @@ function ProductCard({ product, onAdd, formatMoney }: {
       </div>
       <div style={{
         fontSize: 14, fontWeight: 800,
-        color: '#22c55e', marginTop: 4,
+        color: isDiscounted ? '#f472b6' : '#22c55e', marginTop: 4,
+        display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap'
       }}>
-        {formatMoney(product.sell_price)}
+        {isDiscounted && (
+          <span style={{ textDecoration: 'line-through', color: 'rgba(255,255,255,0.3)', fontSize: 11, fontWeight: 500 }}>
+            {formatMoney(product.sell_price)}
+          </span>
+        )}
+        <span>{formatMoney(displayPrice)}</span>
       </div>
       {!product.is_service && (
         <div style={{
