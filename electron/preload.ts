@@ -14,6 +14,7 @@ const api = {
     exportCSV: () => ipcRenderer.invoke('products:exportCSV'),
     getLowStock: () => ipcRenderer.invoke('products:getLowStock'),
     updateStock: (id: number, qty: number) => ipcRenderer.invoke('products:updateStock', id, qty),
+    toggleActive: (id: number, isActive: number, userId?: number) => ipcRenderer.invoke('products:toggleActive', id, isActive, userId),
   },
 
   // Categories

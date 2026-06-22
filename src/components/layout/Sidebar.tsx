@@ -5,7 +5,7 @@ import {
   Users, Truck, BarChart2, Tag, DollarSign, Settings,
   Zap, LogOut, Lock, ChevronLeft, ChevronRight
 } from 'lucide-react'
-import { useAuthStore, useUIStore, useSessionStore } from '../../store'
+import { useAuthStore, useUIStore, useSessionStore, useAppNameStore } from '../../store'
 import toast from 'react-hot-toast'
 import { useTranslation } from '../../hooks/useTranslation'
 
@@ -29,6 +29,7 @@ export default function Sidebar() {
   const { user, logout, lock } = useAuthStore()
   const { sidebarOpen, setSidebarOpen } = useUIStore()
   const { currentSession } = useSessionStore()
+  const { appName } = useAppNameStore()
 
   const isPOS = location.pathname === '/pos'
 
@@ -70,7 +71,7 @@ export default function Sidebar() {
         {sidebarOpen && (
           <div style={{ overflow: 'hidden' }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: 'rgba(255,255,255,0.95)', whiteSpace: 'nowrap' }}>
-              Make a Deal
+              {appName}
             </div>
             <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontWeight: 500 }}>
               POS System v1.0

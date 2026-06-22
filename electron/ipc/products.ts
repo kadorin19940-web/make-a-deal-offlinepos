@@ -161,7 +161,8 @@ export function registerProductHandlers(db: Database.Database) {
       const validColumns = [
         'barcode', 'sku', 'name', 'name_en', 'description', 'category_id', 'unit',
         'cost_price', 'sell_price', 'sell_price2', 'sell_price3', 'stock_qty', 'min_stock', 'max_stock',
-        'image_path', 'is_service', 'is_active', 'has_variants', 'tax_rate'
+        'image_path', 'is_service', 'is_active', 'has_variants', 'tax_rate',
+        'special_price', 'discount_percent', 'special_price_enabled', 'discount_enabled', 'price_schedules'
       ]
       const updateData: Record<string, any> = {}
       for (const col of validColumns) {
@@ -177,6 +178,20 @@ export function registerProductHandlers(db: Database.Database) {
       return { success: false, error: String(error) }
     }
   })
+
+  // Realtime toggle for is_active (no admin DB re-check, uses session user role from preload)
+  ipcMain.handle('products:toggleActive', (_, id: number, isActive: number, userId?: number) => {
+    try {
+      if (!checkAdmin(db, userId)) {
+        return { success: false, error: 'Unauthorized: Admin privileges required.' }
+      }
+      db.prepare('UPDATE products SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(isActive, id)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
 
   ipcMain.handle('products:delete', (_, id: number, userId?: number) => {
     try {

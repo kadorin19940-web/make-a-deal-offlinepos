@@ -419,6 +419,21 @@ function runMigrations() {
     }
     db.prepare("INSERT OR REPLACE INTO shop_settings (key, value) VALUES ('db_version', '4')").run()
   }
+
+  if (currentVersion < 5) {
+    // v5: Add special price, discount, and time schedule columns to products
+    const migrations = [
+      `ALTER TABLE products ADD COLUMN special_price REAL DEFAULT NULL`,
+      `ALTER TABLE products ADD COLUMN discount_percent REAL DEFAULT NULL`,
+      `ALTER TABLE products ADD COLUMN special_price_enabled INTEGER DEFAULT 0`,
+      `ALTER TABLE products ADD COLUMN discount_enabled INTEGER DEFAULT 0`,
+      `ALTER TABLE products ADD COLUMN price_schedules TEXT DEFAULT NULL`,
+    ]
+    for (const sql of migrations) {
+      try { db.exec(sql) } catch (_) { /* column already exists */ }
+    }
+    db.prepare("INSERT OR REPLACE INTO shop_settings (key, value) VALUES ('db_version', '5')").run()
+  }
 }
 
 function seedData() {

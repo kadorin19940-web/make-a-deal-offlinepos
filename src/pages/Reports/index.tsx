@@ -29,6 +29,7 @@ export default function ReportsPage() {
   const [topCustomers, setTopCustomers] = useState<any[]>([])
   const [saleItems, setSaleItems] = useState<any[]>([])
   const [editingSale, setEditingSale] = useState<any | null>(null)
+  const [todaySales, setTodaySales] = useState<any[]>([])
 
   const isAdmin = currentUser?.role?.toLowerCase() === 'admin' || currentUser?.role?.toLowerCase() === 'manager'
 
@@ -96,6 +97,17 @@ export default function ReportsPage() {
       const pivotRes = await api.sales.getSaleItemsReport(filters)
       if (pivotRes.success) {
         setSaleItems(pivotRes.data)
+      }
+
+      // 6. Fetch Today's Sale Items (For Req 8)
+      const todayStr = format(new Date(), 'yyyy-MM-dd')
+      const todayRes = await api.sales.getSaleItemsReport({
+        from_date: todayStr,
+        to_date: todayStr,
+        userId: currentUser.id
+      })
+      if (todayRes.success) {
+        setTodaySales(todayRes.data)
       }
 
     } catch (err) {
@@ -439,6 +451,54 @@ export default function ReportsPage() {
                       <Bar dataKey="count" fill="#8b5cf6" radius={[4, 4, 0, 0]} opacity={0.85} />
                     </BarChart>
                   </ResponsiveContainer>
+                )}
+              </div>
+
+              {/* [Req 8] Today's Sales Table */}
+              <div className="glass-card p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-bold text-gray-200">รายการขายวันนี้ (Today's Sales List)</h3>
+                  <span className="text-xs text-green-400 font-semibold">
+                    รวมยอดขายวันนี้: {fmt(todaySales.filter((s: any) => s.status !== 'void').reduce((sum: number, s: any) => sum + (s.total || 0), 0))} ({todaySales.filter((s: any) => s.status !== 'void').length} บิล)
+                  </span>
+                </div>
+                {todaySales.length === 0 ? (
+                  <div className="h-24 flex items-center justify-center text-gray-500 text-xs">ยังไม่มีรายการขายในวันนี้</div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="data-table w-full">
+                      <thead>
+                        <tr className="border-b border-white/5 bg-white/[0.01]">
+                          <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400">เวลา</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400">เลขที่ใบเสร็จ</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400">ชื่อสินค้า</th>
+                          <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400">จำนวน</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400">ยอดรวม</th>
+                          <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400">สถานะ</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {todaySales.map((item: any, i: number) => {
+                          const isVoid = item.status === 'void'
+                          const timeStr = item.sale_date ? item.sale_date.substring(11, 16) : ''
+                          return (
+                            <tr key={i} className="border-b border-white/5 hover:bg-white/[0.02] transition" style={isVoid ? { opacity: 0.4 } : {}}>
+                              <td className="px-4 py-3 text-xs text-gray-300 font-medium">{timeStr} น.</td>
+                              <td className="px-4 py-3 text-xs font-bold text-white">{item.receipt_no}</td>
+                              <td className="px-4 py-3 font-bold text-white text-xs">{item.product_name}</td>
+                              <td className="px-4 py-3 text-center text-xs text-gray-300">{item.qty} {item.unit || 'ชิ้น'}</td>
+                              <td className="px-4 py-3 text-xs font-semibold text-green-400 text-right">{fmt(item.total)}</td>
+                              <td className="px-4 py-3 text-center text-xs">
+                                <span className={`badge ${isVoid ? 'badge-red' : 'badge-green'}`}>
+                                  {isVoid ? 'ยกเลิก' : 'เสร็จสิ้น'}
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             </div>

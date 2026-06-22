@@ -8,14 +8,43 @@ import {
   Search, Plus, Minus, Trash2, UserPlus,
   ShoppingBag, X, Tag, RotateCcw,
   Zap, CreditCard, Banknote, Smartphone, Package,
-  ArrowLeft
+  ArrowLeft, Layers
 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { useCartStore, useAuthStore, useSettingsStore, useSessionStore, useUIStore } from '../../store'
+import { useCartStore, useAuthStore, useSettingsStore, useSessionStore, useUIStore, usePresetsStore, useAppNameStore } from '../../store'
 import type { Product, Category, Customer, CartItem, Promotion } from '../../types'
 import PaymentModal from './PaymentModal'
 import CustomerSearchModal from './CustomerSearchModal'
 import { useTranslation } from '../../hooks/useTranslation'
+
+// Helper: compute effective price for a product based on special_price/discount + time schedule
+function getEffectivePrice(product: Product): number {
+  const now = new Date()
+  const nowMins = now.getHours() * 60 + now.getMinutes()
+
+  const isInSchedule = (): boolean => {
+    if (!product.price_schedules) return true
+    try {
+      const schedules: { start: string; end: string }[] = JSON.parse(product.price_schedules)
+      if (schedules.length === 0) return true
+      return schedules.some(s => {
+        const [sh, sm] = s.start.split(':').map(Number)
+        const [eh, em] = s.end.split(':').map(Number)
+        const startMins = sh * 60 + sm
+        const endMins = eh * 60 + em
+        return nowMins >= startMins && nowMins <= endMins
+      })
+    } catch { return true }
+  }
+
+  if (product.special_price_enabled && product.special_price != null && isInSchedule()) {
+    return product.special_price
+  }
+  if (product.discount_enabled && product.discount_percent != null && isInSchedule()) {
+    return Math.round(product.sell_price * (1 - product.discount_percent / 100) * 100) / 100
+  }
+  return product.sell_price
+}
 
 // Detect electron or browser
 const api = (window as unknown as { api?: unknown }).api as {
@@ -58,6 +87,8 @@ export default function POSPage() {
   const { settings } = useSettingsStore()
   const { currentSession, setSession } = useSessionStore()
   const { cartOnRight, setCartOnRight } = useUIStore()
+  const { presets, activePresetId, setActivePreset } = usePresetsStore()
+  const { appName } = useAppNameStore()
 
   // [FIXED: POS Layout Swap — Minimum Width Guard]
   useEffect(() => {
@@ -77,7 +108,8 @@ export default function POSPage() {
   const isSwapAllowed = windowWidth >= 1024
   const activeCartOnRight = isSwapAllowed ? cartOnRight : false
 
-  // Session check - Force shift to be open before using POS
+  // [FIXED: Alert ซ้ำ — Req 9] ใช้ ref guard ให้ toast แสดงแค่ครั้งเดียวต่อ mount
+  const alertShownRef = useRef(false)
   useEffect(() => {
     const checkActiveSession = async () => {
       if ((window as any).api?.sessions) {
@@ -86,11 +118,15 @@ export default function POSPage() {
           setSession(res.data)
         } else {
           setSession(null)
-          toast.error(t('กรุณาเปิดกะทำงานก่อนเข้าใช้งานหน้าขาย!'), { duration: 4000 })
-          navigate('/sessions')
+          if (!alertShownRef.current) {
+            alertShownRef.current = true
+            toast.error(t('กรุณาเปิดกะทำงานก่อนเข้าใช้งานหน้าขาย!'), { duration: 4000 })
+            navigate('/sessions')
+          }
         }
       } else {
-        if (!currentSession) {
+        if (!currentSession && !alertShownRef.current) {
+          alertShownRef.current = true
           toast.error(t('กรุณาเปิดกะทำงานก่อนเข้าใช้งานหน้าขาย!'), { duration: 4000 })
           navigate('/sessions')
         }
@@ -211,6 +247,13 @@ export default function POSPage() {
 
   const filterProducts = useCallback(() => {
     let filtered = products
+    // [Req 1 & 5] Filter by active Preset — if preset selected, show only enabled products
+    if (activePresetId) {
+      const activePreset = presets.find(p => p.id === activePresetId)
+      if (activePreset) {
+        filtered = filtered.filter(p => !!activePreset.productEnabled[p.id])
+      }
+    }
     if (selectedCategory) filtered = filtered.filter(p => p.category_id === selectedCategory)
     if (searchQuery) {
       const q = searchQuery.toLowerCase()
@@ -221,16 +264,17 @@ export default function POSPage() {
       )
     }
     setFilteredProducts(filtered)
-  }, [products, selectedCategory, searchQuery])
+  }, [products, selectedCategory, searchQuery, activePresetId, presets])
 
   const addToCart = (product: Product) => {
     if (!product.is_service && product.stock_qty <= 0) {
       toast.error(t('สินค้าหมด'))
       return
     }
-    const price = customer?.price_level === 2 ? (product.sell_price2 ?? product.sell_price)
+    // [Req 6] Use effective price (special/discount/schedule) or price level
+    const basePrice = customer?.price_level === 2 ? (product.sell_price2 ?? product.sell_price)
       : customer?.price_level === 3 ? (product.sell_price3 ?? product.sell_price)
-      : product.sell_price
+      : getEffectivePrice(product)
 
     const item: CartItem = {
       product_id: product.id,
@@ -239,10 +283,10 @@ export default function POSPage() {
       qty: 1,
       unit: product.unit,
       cost_price: product.cost_price,
-      unit_price: price,
+      unit_price: basePrice,
       discount_amount: 0,
       discount_percent: 0,
-      total: price,
+      total: basePrice,
       is_service: product.is_service,
       product: product
     }
@@ -406,31 +450,38 @@ export default function POSPage() {
             <Zap size={16} color="#000" />
           </div>
           <span style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,0.9)' }}>
-            {t('Make a Deal POS')}
+            {appName} POS
           </span>
 
           <div style={{ flex: 1 }} />
 
-          {/* Manual Drawer Trigger (Admin Only) */}
+          {/* [Req 10] Manual Drawer Trigger — print blank receipt to open drawer via printer DK cable */}
           {user?.role?.toLowerCase() === 'admin' && (
             <button
               onClick={async () => {
                 try {
-                  const comPort = settings.cash_drawer_port || 'COM1'
-                  const res = await (window as any).api.hardware.openDrawer(comPort)
+                  const drawerSaleData = {
+                    receipt_no: `DRAWER-${Date.now()}`,
+                    sale_date: new Date().toISOString(),
+                    items: [],
+                    subtotal: 0, discount_amount: 0, total: 0,
+                    paid_amount: 0, change_amount: 0,
+                    payment_method: 'cash', tax_amount: 0,
+                  }
+                  const res = await (window as any).api.print.receipt(drawerSaleData, settings)
                   if (res.success) {
-                    toast.success(t('เปิดลิ้นชักเงินสด (Manual) สำเร็จ'))
+                    toast.success(t('ส่งคำสั่งเปิดลิ้นชักผ่านเครื่องพิมพ์สำเร็จ'))
                   } else {
-                    toast.error(t('เปิดลิ้นชักล้มเหลว: {{error}}', { error: res.error }))
+                    toast.error(t('เปิดลิ้นชักล้มเหลว: {{error}}', { error: res.error || 'ไม่สามารถพิมพ์ได้' }))
                   }
                 } catch (e) {
-                  toast.error(t('ข้อผิดพลาดฮาร์ดแวร์: {{error}}', { error: String(e) }))
+                  toast.error(t('ข้อผิดพลาด: {{error}}', { error: String(e) }))
                 }
               }}
               className="px-3 py-1.5 bg-amber-950/40 border border-amber-500/30 hover:border-amber-500 text-amber-500 hover:text-amber-400 hover:bg-amber-950/60 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all duration-200 shadow-md shadow-amber-950/20"
             >
               <Zap size={12} />
-              {t('เปิดลิ้นชักเงินสด')}
+              {t('เปิดลิ้นชัก')}
             </button>
           )}
 
@@ -675,6 +726,45 @@ export default function POSPage() {
               </button>
             )}
           </div>
+        </div>
+
+        {/* [Req 1 & 5] Preset Selector Dropdown */}
+        <div style={{
+          padding: '8px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          borderBottom: '1px solid rgba(255,255,255,0.04)',
+          background: 'rgba(255,255,255,0.02)',
+          flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Layers size={14} color="#818cf8" />
+            <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', fontWeight: 600 }}>{t('พรีเซ็ตสินค้า:')}</span>
+          </div>
+          <select
+            value={activePresetId || ''}
+            onChange={e => setActivePreset(e.target.value || null)}
+            style={{
+              padding: '4px 12px',
+              fontSize: 12,
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 8,
+              color: 'rgba(255,255,255,0.85)',
+              outline: 'none',
+              cursor: 'pointer',
+              minWidth: 160,
+              fontFamily: 'inherit',
+            }}
+          >
+            <option value="" style={{ background: '#0f172a', color: '#fff' }}>{t('แสดงสินค้าทั้งหมด')}</option>
+            {presets.map(p => (
+              <option key={p.id} value={p.id} style={{ background: '#0f172a', color: '#fff' }}>
+                {p.name} ({Object.values(p.productEnabled).filter(Boolean).length} {t('ชิ้น')})
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Categories */}

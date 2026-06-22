@@ -16,6 +16,11 @@ export interface Product {
   sell_price: number
   sell_price2?: number
   sell_price3?: number
+  special_price?: number
+  discount_percent?: number
+  special_price_enabled?: number
+  discount_enabled?: number
+  price_schedules?: string
   stock_qty: number
   min_stock: number
   max_stock: number

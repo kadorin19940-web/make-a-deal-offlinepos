@@ -249,3 +249,93 @@ export const useUIStore = create<UIState>()(
     { name: 'ui-store' }
   )
 )
+
+// ============ App Name Store ============
+interface AppNameState {
+  appName: string
+  setAppName: (name: string) => void
+}
+
+export const useAppNameStore = create<AppNameState>()(
+  persist(
+    (set) => ({
+      appName: 'Make a Deal',
+      setAppName: (appName) => set({ appName }),
+    }),
+    { name: 'app-name-store' }
+  )
+)
+
+// ============ Presets Store ============
+export interface ProductPreset {
+  id: string
+  name: string
+  // productId → true=enabled, false/missing=disabled
+  productEnabled: Record<number, boolean>
+}
+
+interface PresetsState {
+  presets: ProductPreset[]
+  activePresetId: string | null
+  createPreset: (name: string) => string
+  renamePreset: (id: string, name: string) => void
+  deletePreset: (id: string) => void
+  toggleProductInPreset: (presetId: string, productId: number, enabled: boolean) => void
+  setActivePreset: (id: string | null) => void
+  enableAllInPreset: (presetId: string, productIds: number[]) => void
+}
+
+export const usePresetsStore = create<PresetsState>()(
+  persist(
+    (set, get) => ({
+      presets: [],
+      activePresetId: null,
+
+      createPreset: (name: string) => {
+        const id = `preset_${Date.now()}`
+        set((s) => ({
+          presets: [...s.presets, { id, name, productEnabled: {} }]
+        }))
+        return id
+      },
+
+      renamePreset: (id, name) => {
+        set((s) => ({
+          presets: s.presets.map(p => p.id === id ? { ...p, name } : p)
+        }))
+      },
+
+      deletePreset: (id) => {
+        set((s) => ({
+          presets: s.presets.filter(p => p.id !== id),
+          activePresetId: s.activePresetId === id ? null : s.activePresetId,
+        }))
+      },
+
+      toggleProductInPreset: (presetId, productId, enabled) => {
+        set((s) => ({
+          presets: s.presets.map(p => {
+            if (p.id !== presetId) return p
+            return {
+              ...p,
+              productEnabled: { ...p.productEnabled, [productId]: enabled }
+            }
+          })
+        }))
+      },
+
+      enableAllInPreset: (presetId, productIds) => {
+        const enabled: Record<number, boolean> = {}
+        productIds.forEach(id => { enabled[id] = true })
+        set((s) => ({
+          presets: s.presets.map(p =>
+            p.id === presetId ? { ...p, productEnabled: enabled } : p
+          )
+        }))
+      },
+
+      setActivePreset: (id) => set({ activePresetId: id }),
+    }),
+    { name: 'presets-store' }
+  )
+)
