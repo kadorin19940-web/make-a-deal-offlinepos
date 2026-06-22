@@ -1,13 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Plus, Tag, Percent, DollarSign, X, Edit2, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { Promotion } from '../../types'
-
-const MOCK_PROMOS: Promotion[] = [
-  { id: 1, name: 'ส่วนลดต้อนรับ', type: 'percent_off', code: 'WELCOME10', discount_value: 10, min_purchase: 500, apply_to: 'all', usage_count: 12, usage_limit: 100, is_active: 1, created_at: '2024-01-01' },
-  { id: 2, name: 'ลด 50 บาท', type: 'amount_off', code: 'SAVE50', discount_value: 50, min_purchase: 300, apply_to: 'all', usage_count: 5, is_active: 1, created_at: '2024-01-02' },
-  { id: 3, name: 'ลดราคาสุดสัปดาห์', type: 'percent_off', code: 'WEEKEND20', discount_value: 20, min_purchase: 1000, max_discount: 500, apply_to: 'all', usage_count: 8, usage_limit: 50, is_active: 0, created_at: '2024-01-03' },
-]
 
 const TYPE_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   percent_off: { label: 'ลด %', color: '#22c55e', icon: <Percent size={14} /> },
@@ -17,57 +11,143 @@ const TYPE_CONFIG: Record<string, { label: string; color: string; icon: React.Re
 }
 
 export default function PromotionsPage() {
-  const [promos, setPromos] = useState<Promotion[]>(MOCK_PROMOS)
+  const [promos, setPromos] = useState<Promotion[]>([])
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Promotion | null>(null)
   const [form, setForm] = useState({ name: '', type: 'percent_off', code: '', discount_value: 0, min_purchase: 0, max_discount: '', usage_limit: '', is_active: 1 })
 
-  const toggleActive = (id: number) => {
-    setPromos(p => p.map(x => x.id === id ? { ...x, is_active: x.is_active ? 0 : 1 } : x))
+  const api = (window as any).api
+
+  const loadData = async () => {
+    if (!api?.promotions) return
+    try {
+      const res = await api.promotions.getAll()
+      if (res.success && res.data) {
+        setPromos(res.data)
+      }
+    } catch (error) {
+      console.error(error)
+      toast.error('ไม่สามารถโหลดข้อมูลโปรโมชันได้')
+    }
   }
 
-  const handleDelete = (id: number) => {
+  useEffect(() => {
+    loadData()
+  }, [])
+
+  const toggleActive = async (id: number) => {
+    const promo = promos.find(x => x.id === id)
+    if (!promo) return
+    const newStatus = promo.is_active ? 0 : 1
+    
+    if (api?.promotions) {
+      try {
+        const res = await api.promotions.update(id, { is_active: newStatus })
+        if (res.success) {
+          setPromos(p => p.map(x => x.id === id ? { ...x, is_active: newStatus } : x))
+          toast.success(newStatus ? 'เปิดใช้งานโปรโมชันแล้ว' : 'ปิดใช้งานโปรโมชันแล้ว')
+        } else {
+          toast.error(res.error || 'เกิดข้อผิดพลาดในการแก้ไขสถานะ')
+        }
+      } catch (error) {
+        toast.error('เกิดข้อผิดพลาดในการเชื่อมต่อข้อมูล')
+      }
+    } else {
+      setPromos(p => p.map(x => x.id === id ? { ...x, is_active: newStatus } : x))
+      toast.success(newStatus ? 'เปิดใช้งานโปรโมชันแล้ว' : 'ปิดใช้งานโปรโมชันแล้ว')
+    }
+  }
+
+  const handleDelete = async (id: number) => {
     if (!confirm('ต้องการลบโปรโมชันนี้?')) return
-    setPromos(p => p.filter(x => x.id !== id))
-    toast.success('ลบโปรโมชันแล้ว')
+    
+    if (api?.promotions) {
+      try {
+        const res = await api.promotions.delete(id)
+        if (res.success) {
+          toast.success('ลบโปรโมชันแล้ว')
+          loadData()
+        } else {
+          toast.error(res.error || 'เกิดข้อผิดพลาดในการลบ')
+        }
+      } catch (error) {
+        toast.error('เกิดข้อผิดพลาดในการเชื่อมต่อข้อมูล')
+      }
+    } else {
+      setPromos(p => p.filter(x => x.id !== id))
+      toast.success('ลบโปรโมชันแล้ว')
+    }
   }
 
   const openEdit = (p?: Promotion) => {
     setEditing(p || null)
-    setForm(p ? { name: p.name, type: p.type, code: p.code || '', discount_value: p.discount_value, min_purchase: p.min_purchase, max_discount: String(p.max_discount || ''), usage_limit: String(p.usage_limit || ''), is_active: p.is_active } : { name: '', type: 'percent_off', code: '', discount_value: 0, min_purchase: 0, max_discount: '', usage_limit: '', is_active: 1 })
+    setForm(p ? { name: p.name, type: p.type, code: p.code || '', discount_value: p.discount_value, min_purchase: p.min_purchase, max_discount: String(p.max_discount ?? ''), usage_limit: String(p.usage_limit ?? ''), is_active: p.is_active } : { name: '', type: 'percent_off', code: '', discount_value: 0, min_purchase: 0, max_discount: '', usage_limit: '', is_active: 1 })
     setShowModal(true)
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.name.trim()) { toast.error('กรุณากรอกชื่อโปรโมชัน'); return }
     const promoType = form.type as Promotion['type']
-    if (editing) {
-      setPromos(p => p.map(x => x.id === editing.id
-        ? {
-            ...x,
-            name: form.name, type: promoType, code: form.code,
-            discount_value: Number(form.discount_value),
-            min_purchase: Number(form.min_purchase),
-            max_discount: form.max_discount ? Number(form.max_discount) : undefined,
-            usage_limit: form.usage_limit ? Number(form.usage_limit) : undefined,
-            is_active: form.is_active,
-          }
-        : x
-      ))
-      toast.success('แก้ไขโปรโมชันแล้ว')
-    } else {
-      const newP: Promotion = {
-        id: Date.now(), name: form.name, type: promoType, code: form.code,
-        discount_value: Number(form.discount_value), min_purchase: Number(form.min_purchase),
-        max_discount: form.max_discount ? Number(form.max_discount) : undefined,
-        usage_limit: form.usage_limit ? Number(form.usage_limit) : undefined,
-        usage_count: 0, apply_to: 'all', is_active: form.is_active,
-        created_at: new Date().toISOString()
-      }
-      setPromos(p => [...p, newP])
-      toast.success('เพิ่มโปรโมชันแล้ว')
+    
+    const payload = {
+      name: form.name,
+      type: promoType,
+      code: form.code.trim() || null,
+      discount_value: Number(form.discount_value),
+      min_purchase: Number(form.min_purchase),
+      max_discount: form.max_discount ? Number(form.max_discount) : null,
+      usage_limit: form.usage_limit ? Number(form.usage_limit) : null,
+      is_active: form.is_active,
+      apply_to: 'all'
     }
-    setShowModal(false)
+
+    if (api?.promotions) {
+      try {
+        let res
+        if (editing) {
+          res = await api.promotions.update(editing.id, payload)
+        } else {
+          res = await api.promotions.create(payload)
+        }
+        
+        if (res.success) {
+          toast.success(editing ? 'แก้ไขโปรโมชันแล้ว' : 'เพิ่มโปรโมชันแล้ว')
+          loadData()
+          setShowModal(false)
+        } else {
+          toast.error(res.error || 'เกิดข้อผิดพลาดในการบันทึก')
+        }
+      } catch (error) {
+        toast.error('เกิดข้อผิดพลาดในการเชื่อมต่อข้อมูล')
+      }
+    } else {
+      if (editing) {
+        setPromos(p => p.map(x => x.id === editing.id
+          ? {
+              ...x,
+              ...payload,
+              code: payload.code || undefined,
+              max_discount: payload.max_discount || undefined,
+              usage_limit: payload.usage_limit || undefined,
+            }
+          : x
+        ))
+        toast.success('แก้ไขโปรโมชันแล้ว')
+      } else {
+        const newP: Promotion = {
+          id: Date.now(),
+          ...payload,
+          code: payload.code || undefined,
+          max_discount: payload.max_discount || undefined,
+          usage_limit: payload.usage_limit || undefined,
+          usage_count: 0,
+          created_at: new Date().toISOString()
+        }
+        setPromos(p => [...p, newP])
+        toast.success('เพิ่มโปรโมชันแล้ว')
+      }
+      setShowModal(false)
+    }
   }
 
   return (
@@ -152,11 +232,27 @@ export default function PromotionsPage() {
             <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div>
                 <label style={{ display: 'block', fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 5 }}>ชื่อโปรโมชัน *</label>
-                <input className="glass-input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="ชื่อโปรโมชัน" />
+                <input
+                  className="glass-input"
+                  value={form.name}
+                  onChange={e => {
+                    const val = e.target.value
+                    setForm(f => ({ ...f, name: val }))
+                  }}
+                  placeholder="ชื่อโปรโมชัน"
+                />
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 5 }}>ประเภท</label>
-                <select className="glass-input" value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.8)' }}>
+                <select
+                  className="glass-input"
+                  value={form.type}
+                  onChange={e => {
+                    const val = e.target.value
+                    setForm(f => ({ ...f, type: val }))
+                  }}
+                  style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.8)' }}
+                >
                   <option value="percent_off">ลด % จากราคา</option>
                   <option value="amount_off">ลดจำนวนเงิน ฿</option>
                   <option value="buy_x_get_y">ซื้อครบแถม</option>
@@ -164,28 +260,70 @@ export default function PromotionsPage() {
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 5 }}>คูปองโค้ด</label>
-                <input className="glass-input" value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase() }))} placeholder="เช่น SALE20 (ว่างได้)" />
+                <input
+                  className="glass-input"
+                  value={form.code}
+                  onChange={e => {
+                    const val = e.target.value.toUpperCase()
+                    setForm(f => ({ ...f, code: val }))
+                  }}
+                  placeholder="เช่น SALE20 (ว่างได้)"
+                />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 <div>
                   <label style={{ display: 'block', fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 5 }}>
                     มูลค่าส่วนลด {form.type === 'percent_off' ? '(%)' : '(฿)'}
                   </label>
-                  <input className="glass-input" type="number" value={form.discount_value} onChange={e => setForm(f => ({ ...f, discount_value: parseFloat(e.target.value) || 0 }))} />
+                  <input
+                    className="glass-input"
+                    type="number"
+                    value={form.discount_value}
+                    onChange={e => {
+                      const val = parseFloat(e.target.value) || 0
+                      setForm(f => ({ ...f, discount_value: val }))
+                    }}
+                  />
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 5 }}>ยอดขั้นต่ำ (฿)</label>
-                  <input className="glass-input" type="number" value={form.min_purchase} onChange={e => setForm(f => ({ ...f, min_purchase: parseFloat(e.target.value) || 0 }))} />
+                  <input
+                    className="glass-input"
+                    type="number"
+                    value={form.min_purchase}
+                    onChange={e => {
+                      const val = parseFloat(e.target.value) || 0
+                      setForm(f => ({ ...f, min_purchase: val }))
+                    }}
+                  />
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 <div>
                   <label style={{ display: 'block', fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 5 }}>ส่วนลดสูงสุด (฿)</label>
-                  <input className="glass-input" type="number" value={form.max_discount} onChange={e => setForm(f => ({ ...f, max_discount: e.target.value }))} placeholder="ไม่จำกัด" />
+                  <input
+                    className="glass-input"
+                    type="number"
+                    value={form.max_discount}
+                    onChange={e => {
+                      const val = e.target.value
+                      setForm(f => ({ ...f, max_discount: val }))
+                    }}
+                    placeholder="ไม่จำกัด"
+                  />
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 5 }}>จำกัดการใช้ (ครั้ง)</label>
-                  <input className="glass-input" type="number" value={form.usage_limit} onChange={e => setForm(f => ({ ...f, usage_limit: e.target.value }))} placeholder="ไม่จำกัด" />
+                  <input
+                    className="glass-input"
+                    type="number"
+                    value={form.usage_limit}
+                    onChange={e => {
+                      const val = e.target.value
+                      setForm(f => ({ ...f, usage_limit: val }))
+                    }}
+                    placeholder="ไม่จำกัด"
+                  />
                 </div>
               </div>
             </div>

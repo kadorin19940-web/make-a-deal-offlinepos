@@ -1640,10 +1640,16 @@ export default function SettingsPage() {
               {/* Name + Username row */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <FormField label="ชื่อ-นามสกุล *">
-                  <input className="glass-input" value={userForm.name} onChange={e => setUserForm(f => ({ ...f, name: e.target.value }))} placeholder="สมชาย ใจดี" />
+                  <input className="glass-input" value={userForm.name} onChange={e => {
+                    const val = e.target.value;
+                    setUserForm(f => ({ ...f, name: val }));
+                  }} placeholder="สมชาย ใจดี" />
                 </FormField>
                 <FormField label="ชื่อผู้ใช้ (username) *">
-                  <input className="glass-input" value={userForm.username} onChange={e => setUserForm(f => ({ ...f, username: e.target.value.toLowerCase().replace(/\s/g,'') }))} placeholder="somchai" autoCapitalize="none" />
+                  <input className="glass-input" value={userForm.username} onChange={e => {
+                    const val = e.target.value.toLowerCase().replace(/\s/g,'');
+                    setUserForm(f => ({ ...f, username: val }));
+                  }} placeholder="somchai" autoCapitalize="none" />
                 </FormField>
               </div>
 
@@ -1654,7 +1660,10 @@ export default function SettingsPage() {
                     className="glass-input"
                     type={showPw ? 'text' : 'password'}
                     value={userForm.password}
-                    onChange={e => setUserForm(f => ({ ...f, password: e.target.value }))}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setUserForm(f => ({ ...f, password: val }));
+                    }}
                     placeholder={editingUser ? 'กรอกเพื่อเปลี่ยนรหัสผ่าน' : 'รหัสผ่านอย่างน้อย 6 ตัว'}
                     style={{ paddingRight: 42 }}
                   />
@@ -1670,7 +1679,10 @@ export default function SettingsPage() {
                     className="glass-input"
                     type={showConfirmPw ? 'text' : 'password'}
                     value={userForm.confirmPassword}
-                    onChange={e => setUserForm(f => ({ ...f, confirmPassword: e.target.value }))}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setUserForm(f => ({ ...f, confirmPassword: val }));
+                    }}
                     placeholder="กรอกรหัสผ่านอีกครั้ง"
                     style={{
                       paddingRight: 42,
@@ -1693,7 +1705,10 @@ export default function SettingsPage() {
               {/* PIN + Role row */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <FormField label="PIN ล็อกหน้าจอ (4-6 หลัก)">
-                  <input className="glass-input" type="password" inputMode="numeric" value={userForm.pin} onChange={e => setUserForm(f => ({ ...f, pin: e.target.value.replace(/\D/g,'').slice(0,6) }))} placeholder="เช่น 1234" maxLength={6} />
+                  <input className="glass-input" type="password" inputMode="numeric" value={userForm.pin} onChange={e => {
+                    const val = e.target.value.replace(/\D/g,'').slice(0,6);
+                    setUserForm(f => ({ ...f, pin: val }));
+                  }} placeholder="เช่น 1234" maxLength={6} />
                 </FormField>
                 <FormField label="บทบาท">
                   <select
