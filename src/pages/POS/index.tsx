@@ -848,12 +848,10 @@ export default function POSPage() {
           ))}
         </div>
 
-        {/* Products Grid */}
+        {/* Products List — Horizontal Bar */}
         <div style={{
-          flex: 1, overflowY: 'auto', padding: '12px 16px',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-          gap: 12, alignContent: 'start',
+          flex: 1, overflowY: 'auto', padding: '8px 12px',
+          display: 'flex', flexDirection: 'column', gap: 6,
         }}>
           {filteredProducts.map(product => (
             <ProductCard
@@ -866,7 +864,7 @@ export default function POSPage() {
           ))}
           {filteredProducts.length === 0 && (
             <div style={{
-              gridColumn: '1/-1', textAlign: 'center',
+              textAlign: 'center',
               padding: '60px 20px', color: 'rgba(255,255,255,0.2)',
             }}>
               <Package size={40} strokeWidth={1} style={{ margin: '0 auto 12px' }} />
@@ -1043,31 +1041,61 @@ function ProductCard({ product, onAdd, formatMoney, manualSpecialPriceEnabled }:
   return (
     <div
       onClick={() => !outOfStock && onAdd()}
-      className={`product-card-pos ${outOfStock ? 'out-of-stock' : ''}`}
-      style={{ cursor: outOfStock ? 'not-allowed' : 'pointer', minWidth: 0 }}
-    >
-      {/* Category color bar top */}
-      <div style={{
-        position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-        background: product.category_color || '#22c55e',
-        borderRadius: '8px 8px 0 0',
-      }} />
-
-      {/* Product Image / Icon — fixed square */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        width: '100%', aspectRatio: '1 / 1', maxHeight: 100,
-        borderRadius: 8,
-        background: 'rgba(255,255,255,0.03)',
-        border: '1px solid rgba(255,255,255,0.06)',
-        marginTop: 6,
+      style={{
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        padding: '10px 14px',
+        minHeight: 68,
+        background: outOfStock
+          ? 'rgba(255,255,255,0.02)'
+          : 'rgba(255,255,255,0.04)',
+        border: `1px solid ${outOfStock ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.08)'}`,
+        borderRadius: 10,
+        cursor: outOfStock ? 'not-allowed' : 'pointer',
+        opacity: outOfStock ? 0.55 : 1,
+        transition: 'all 0.15s ease',
         overflow: 'hidden',
         flexShrink: 0,
+        flexGrow: 0,
+        boxSizing: 'border-box',
+      }}
+      onMouseEnter={e => {
+        if (!outOfStock) {
+          e.currentTarget.style.background = 'rgba(34,197,94,0.07)'
+          e.currentTarget.style.borderColor = 'rgba(34,197,94,0.25)'
+          e.currentTarget.style.transform = 'translateX(2px)'
+        }
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.background = outOfStock ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.04)'
+        e.currentTarget.style.borderColor = outOfStock ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.08)'
+        e.currentTarget.style.transform = 'translateX(0)'
+      }}
+    >
+      {/* Category color left bar */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0, bottom: 0, width: 3,
+        background: product.category_color || '#22c55e',
+        borderRadius: '10px 0 0 10px',
+      }} />
+
+      {/* Icon / Image */}
+      <div style={{
+        width: 44, height: 44, minWidth: 44, minHeight: 44,
+        borderRadius: 8,
+        background: 'rgba(255,255,255,0.04)',
+        border: '1px solid rgba(255,255,255,0.07)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        overflow: 'hidden',
+        marginLeft: 6,
       }}>
         {product.image_path ? (
-          <img 
-            src={`local-img://${product.image_path}`} 
-            alt={product.name} 
+          <img
+            src={`local-img://${product.image_path}`}
+            alt={product.name}
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
             onError={(e) => {
               e.currentTarget.style.display = 'none';
@@ -1075,73 +1103,73 @@ function ProductCard({ product, onAdd, formatMoney, manualSpecialPriceEnabled }:
               if (pNode) {
                 const fallbackSpan = document.createElement('span');
                 fallbackSpan.innerText = product.category_icon || '📦';
-                fallbackSpan.style.fontSize = '28px';
+                fallbackSpan.style.fontSize = '20px';
                 pNode.appendChild(fallbackSpan);
               }
             }}
           />
         ) : (
-          <span style={{ fontSize: 28 }}>{product.category_icon || '📦'}</span>
+          <span style={{ fontSize: 20 }}>{product.category_icon || '📦'}</span>
         )}
       </div>
 
-      {/* Product Name — 2 lines max */}
-      <div style={{
-        fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.9)',
-        lineHeight: 1.35, marginTop: 6,
-        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-        overflow: 'hidden', minHeight: '2.7em',
-        wordBreak: 'break-word',
-      }}>
-        {product.name}
+      {/* Name + SKU */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 13, fontWeight: 600,
+          color: 'rgba(255,255,255,0.9)',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          lineHeight: 1.4,
+        }}>
+          {product.name}
+        </div>
+        {(product.sku || product.barcode) && (
+          <div style={{
+            fontSize: 10, color: 'rgba(255,255,255,0.28)',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            marginTop: 1,
+          }}>
+            {product.sku || product.barcode}
+          </div>
+        )}
+        {!product.is_service && (
+          <div style={{
+            fontSize: 10, marginTop: 2,
+            color: outOfStock ? '#ef4444' : product.stock_qty <= product.min_stock ? '#fca5a5' : 'rgba(255,255,255,0.3)',
+            fontWeight: outOfStock ? 700 : 400,
+          }}>
+            {outOfStock ? t('หมด') : t('เหลือ {{qty}} {{unit}}', { qty: product.stock_qty, unit: product.unit })}
+          </div>
+        )}
       </div>
 
-      {/* SKU / Barcode */}
-      {(product.sku || product.barcode) && (
-        <div style={{
-          fontSize: 10, color: 'rgba(255,255,255,0.3)',
-          letterSpacing: '0.02em', overflow: 'hidden',
-          textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {product.sku || product.barcode}
-        </div>
-      )}
-
-      {/* Price */}
-      <div style={{
-        fontSize: 14, fontWeight: 800,
-        color: isDiscounted ? '#f472b6' : '#22c55e',
-        display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap',
-        marginTop: 2,
-      }}>
+      {/* Price + Add */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
         {isDiscounted && (
-          <span style={{ textDecoration: 'line-through', color: 'rgba(255,255,255,0.3)', fontSize: 10, fontWeight: 500 }}>
+          <span style={{
+            textDecoration: 'line-through',
+            color: 'rgba(255,255,255,0.25)', fontSize: 10, fontWeight: 500,
+          }}>
             {formatMoney(product.sell_price)}
           </span>
         )}
-        <span>{formatMoney(displayPrice)}</span>
+        <div style={{
+          fontSize: 14, fontWeight: 800,
+          color: isDiscounted ? '#f472b6' : '#22c55e',
+        }}>
+          {formatMoney(displayPrice)}
+        </div>
       </div>
 
-      {/* Stock */}
-      {!product.is_service && (
-        <div style={{
-          fontSize: 10,
-          color: outOfStock ? '#ef4444' : product.stock_qty <= product.min_stock ? '#fca5a5' : 'rgba(255,255,255,0.3)',
-          fontWeight: outOfStock ? 700 : 400,
-        }}>
-          {outOfStock ? t('หมด') : t('เหลือ {{qty}} {{unit}}', { qty: product.stock_qty, unit: product.unit })}
-        </div>
-      )}
-
-      {/* Add indicator */}
+      {/* Add button */}
       <div style={{
-        position: 'absolute', top: 10, right: 10,
-        width: 22, height: 22, borderRadius: '50%',
-        background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)',
+        width: 28, height: 28, borderRadius: '50%',
+        background: outOfStock ? 'rgba(255,255,255,0.04)' : 'rgba(34,197,94,0.15)',
+        border: `1px solid ${outOfStock ? 'rgba(255,255,255,0.08)' : 'rgba(34,197,94,0.35)'}`,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        opacity: 0.7,
+        flexShrink: 0,
       }}>
-        <Plus size={11} color="#22c55e" />
+        <Plus size={13} color={outOfStock ? 'rgba(255,255,255,0.2)' : '#22c55e'} />
       </div>
     </div>
   )
